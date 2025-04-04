@@ -1,0 +1,22 @@
+{
+  "name": "hugin-node",
+  "version": "1.0.0",
+  "description": "A decentralized node system for Hugin messages.",
+  "main": "index.js",
+  "scripts": {
+    "setup": "node setup.js",
+    "start": "node index.js",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "author": "nilsjr",
+  "license": "MIT",
+  "dependencies": {
+    "bare-events": "^2.5.4",
+    "chalk": "^4.1.2",
+    "hyperdb": "^4.9.4",
+    "hyperschema": "^1.10.4",
+    "hyperswarm-hugin": "^1.0.2",
+    "keypear": "^1.2.2",
+    "kryptokrona-wallet-backend-js": "^2.5.8"
+  }
+}
