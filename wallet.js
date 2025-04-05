@@ -129,10 +129,9 @@ class UserWallet {
 
   async verify(message, address, signature) {
     try {
-      const sekrAddr = await Address.fromAddress(address);
       const verify = await xkrUtils.verifyMessageSignature(
         message,
-        sekrAddr.spend.publicKey,
+        address,
         signature,
       );
       return verify;
