@@ -11,7 +11,7 @@ class ViewWallet {
     this.viewkey = "cd196c0f8a36e951b399681d447922f6c54c28c6ef3cad1c65d356c33657ab0b"
     this.wallet = null
     this.txs = [],
-    this.daemon = new WB.Daemon('xkr.network', 443);// TODO ** set custom node.
+    this.daemon = new WB.Daemon('node.xkr.network', 443);// TODO ** set custom node.
   }
 
 async init(password) {
@@ -43,7 +43,7 @@ async import(password) {
   }
 
   async verify(pub) {
-    return this.txs.some(a => a.paymentID === pub && a.totalAmount() === 1000000)
+    return this.txs.some(a => a.paymentID === pub && a.totalAmount() >= 9900000)
   }
 
 
@@ -80,7 +80,7 @@ class UserWallet {
     this.loaded = false;
     this.address = null;
     this.started = false;
-    this.daemon = new WB.Daemon('xkr.network', 443);// TODO ** set custom node.
+    this.daemon = new WB.Daemon('node.xkr.network', 443);// TODO ** set custom node.
   }
 
   async init(password) {
