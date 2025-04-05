@@ -23,13 +23,11 @@ class HuginNode extends EventEmitter {
     this.network.server(Wallet.address)
     
     this.network.on('client-data', ({conn, info, data}) => {
-      console.log("Got client data in Node", data) 
       this.client_message(data, info, conn)
 
   }) 
 
   this.network.on('node-data', ({conn, info, data}) => { 
-      console.log("Got node data", data)  
       this.node_message(data)
   })
 
@@ -95,6 +93,7 @@ class HuginNode extends EventEmitter {
     if (!await this.verify(message)) return false
     if (this.pool.some(a => a.hash == message.hash)) return true
     this.pool.push(message)
+    console.log(chalk.yellow("Pool update. Number of messages:", this.pool.length))
     save(message)
     return true
   }
@@ -119,9 +118,9 @@ class HuginNode extends EventEmitter {
 
       if (message.cipher.length > 2048) return false
       if (message.hash.length > 64) return false
-      if (message.pub.length > 99) return false
+      if (message.pub.length !== 64) return false
       if (message.timestamp.length > 30) return false
-      if (message.signature.length > 129) return false
+      if (message.signature.length !== 128) return false
 
       return true
   }
