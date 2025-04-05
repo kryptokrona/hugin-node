@@ -1,0 +1,32 @@
+{
+  "version": 0,
+  "offset": 0,
+  "schema": [
+    {
+      "name": "messages",
+      "namespace": "messages",
+      "id": 0,
+      "type": 1,
+      "indexes": [
+        "@messages/messages-by-pub"
+      ],
+      "schema": "@messages/messages",
+      "derived": false,
+      "key": [
+        "timestamp"
+      ],
+      "trigger": null
+    },
+    {
+      "name": "messages-by-pub",
+      "namespace": "messages",
+      "id": 1,
+      "type": 2,
+      "collection": "@messages/messages",
+      "unique": false,
+      "key": [
+        "pub"
+      ]
+    }
+  ]
+}

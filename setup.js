@@ -7,7 +7,7 @@ const SCHEMA_DIR = '/spec/hyperschema'
 const DB_DIR = './spec/hyperdb'
 
 const schema = Hyperschema.from(SCHEMA_DIR)
-const reg = schema.namespace('messages')
+const reg = schema.namespace('schema')
 
 reg.register({
   name: 'messages',
