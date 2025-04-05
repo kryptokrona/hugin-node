@@ -22,7 +22,6 @@ async function limit(pubKey) {
   })
 
   const messages = await queryStream.toArray()
-  console.log("messages.length > DAY_LIMIT", messages.length > DAY_LIMIT)
   return messages.length > DAY_LIMIT
 }
 
@@ -48,7 +47,6 @@ async function save(message) {
   });
 
   await db.flush();
-  console.log('Message added:', timestamp, "from:", pub.substring(0,10));
 }
 
 /**
