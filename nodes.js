@@ -15,9 +15,13 @@ class HuginNode extends EventEmitter {
   }
 
   async init(pub = false) {
-    // Hash our private key to get a determenistic dht key pair.
     // This can be used as a trust system for stable nodes in the future?
-    this.network = new Network(await hash(Wallet.spendKey()))
+    
+    // If we have a private node
+    // Hash our private key to get a determenistic dht key pair.
+    const seed = pub ? '' : await hash(Wallet.spendKey())
+    
+    this.network = new Network(seed)
     this.pool = await load()
     this.network.node(NodeWallet.viewkey)
     if (pub) this.network.public_node(await hash(NodeWallet.viewkey))

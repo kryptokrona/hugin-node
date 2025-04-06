@@ -16,7 +16,7 @@ async function start_check() {
   } 
 }
 
-async function start() {
+async function start(pub) {
   const node = new HuginNode()
   await node.init(pub)
   //More events here?
