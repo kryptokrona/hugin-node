@@ -83,7 +83,7 @@ async function delete_old() {
   const old = await stream.toArray();
 
   for (const msg of old) {
-    await db.delete('@messages/messages', { hash: msg.hash });
+    await db.delete('@messages/messages', { timestamp: msg.timestamp });
   }
 
   await db.flush();
