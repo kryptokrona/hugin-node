@@ -14,12 +14,12 @@ class ViewWallet {
     this.daemon = new WB.Daemon('node.xkr.network', 443);// TODO ** set custom node.
   }
 
-async init(password) {
-  if (!(await this.load(password))) return false;
+async init() {
+  if (!(await this.load())) return false;
   return true;
 }
 
-async import(password) {
+async import() {
   const [wallet, err] = await WB.WalletBackend.importViewWallet(this.daemon, 2055000, this.viewkey, this.address);
   if (err) {
     console.log('Failed to load wallet: ' + err.toString());
@@ -62,8 +62,8 @@ async import(password) {
   }
 
 
-  async load(password) {
-    const wallet = await open(password, 'nodewallet', this.daemon)
+  async load() {
+    const wallet = await open('password', 'nodewallet', this.daemon)
     if (!open) return false
     this.wallet = wallet
     await this.start()

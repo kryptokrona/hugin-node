@@ -36,7 +36,7 @@ async function login(retry = false) {
     return
   }
 
-  if(!await NodeWallet.init(password)) {
+  if(!await NodeWallet.init()) {
     console.log(chalk.red("Error importing node wallet."))
   }
   
@@ -67,7 +67,7 @@ async function init() {
       console.log(chalk.red("Error creating your wallet."))
   }
 
-  if (!await NodeWallet.import(password)) {
+  if (!await NodeWallet.import()) {
       console.log(chalk.red("Error importing node wallet."))
   }
   
