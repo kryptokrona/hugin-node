@@ -14,13 +14,14 @@ class HuginNode extends EventEmitter {
     this.network = null
   }
 
-  async init() {
+  async init(pub = false) {
     // Hash our private key to get a determenistic dht key pair.
     // This can be used as a trust system for stable nodes in the future?
     this.network = new Network(await hash(Wallet.spendKey()))
     this.pool = await load()
     this.network.node(NodeWallet.viewkey)
-    this.network.server(Wallet.address)
+    if (pub) this.network.public_node(await hash(NodeWallet.viewkey))
+    else this.network.private_node(Wallet.address)
     
     this.network.on('client-data', ({conn, info, data}) => {
       this.client_message(data, info, conn)

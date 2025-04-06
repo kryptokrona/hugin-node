@@ -7,21 +7,22 @@ const { Wallet } = require('./wallet');
 class Network extends EventEmitter {
   constructor(seed) {
     super()
-    this.keys = create_keys_from_seed(seed) //Seed from private xkr wallet. Static
+    this.keys = create_keys_from_seed(seed) //Seed from private xkr wallet. For private nodes.
     this.nodes = []
     this.clients = []
   }
 
-async swarm(key, server = false) {
+async swarm(key, priv = false, pub = false) {
   let [base_keys, dhtKeys, sig] = get_new_peer_keys(key)
   const topicHash = base_keys.publicKey.toString('hex')
-  const dht_keys = server ? this.keys : dhtKeys
+  const server = priv || pub
+  const dht_keys = priv ? this.keys : dhtKeys
+  let swarm
 
-  if (server) {
+  if (priv) {
     sig =  base_keys.get().sign(dht_keys.get().publicKey)
   }
 
-  let swarm
   try {
      swarm = new Hyperswarm({}, sig, dht_keys, base_keys)
   } catch (e) {
@@ -56,20 +57,32 @@ async node (key) {
 
 }
 
-//Server handles clients
+//Private node handles clients
 
-async server(key) {
+async private_node(key) {
   console.log(chalk.green("Node started ✅"))
   console.log("")
   console.log(chalk.cyan("...................."))
-  console.log('NODE PUBLIC ADDRESS:');
+  console.log('NODE PRIVATE ADDRESS:');
   console.log(chalk.cyan("...................."))
   console.log("")
   console.log(chalk.white(Wallet.address + this.keys.publicKey.toString('hex')))
   console.log("")
-  return await this.swarm(key, true)
-
+  return await this.swarm(key, true, false)
 }
+
+
+//Private node handles clients
+
+async public_node(key) {
+  console.log("")
+  console.log(chalk.cyan("...................."))
+  console.log(chalk.green("Public node started ✅"))
+  console.log(chalk.cyan("...................."))
+  console.log("")
+  return await this.swarm(key, false, true)
+}
+
 
 
 

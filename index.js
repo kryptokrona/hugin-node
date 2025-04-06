@@ -18,7 +18,7 @@ async function start_check() {
 
 async function start() {
   const node = new HuginNode()
-  await node.init()
+  await node.init(pub)
   //More events here?
 }
 
@@ -28,7 +28,7 @@ async function login(retry = false) {
     console.log(huginArt)
     console.log(chalk.white('Welcome back to Hugin Node!'));
   }
-  const password = await inputPass(chalk.white('Enter your password:'))
+  const password = await input_pass(chalk.white('Enter your password:'))
 
   if (!await Wallet.init(password)) {
     console.log(chalk.red("Error starting your wallet."));
@@ -39,8 +39,10 @@ async function login(retry = false) {
   if(!await NodeWallet.init(password)) {
     console.log(chalk.red("Error importing node wallet."))
   }
+  
+  const pub = await public_or_private()
 
-  start()
+  start(pub)
 
 }
 
@@ -50,7 +52,7 @@ async function init() {
   console.log(chalk.white('Welcome to the Hugin Node setup wizard!'));
   console.log(chalk.green('Lets get started...'));
 
-  const password = await inputPass(chalk.white('Choose a password: '));
+  const password = await input_pass(chalk.white('Step 1. Choose a password: '));
 
   console.log(chalk.white("......................................."))
   console.log(chalk.yellow("**NOTE**"))
@@ -73,9 +75,11 @@ async function init() {
   console.log(chalk.blue("Loading...."))
   await sleep(200)
 
+  const pub = await public_or_private()
+
   console.log(chalk.magenta('🎉 Setup complete! You are ready to go.'));
 
-  start()
+  start(pub)
 
 }
 const rl = readline.createInterface({
@@ -83,8 +87,29 @@ const rl = readline.createInterface({
   output: process.stdout
 });
 
+const question = 'Is this a public node?'
+const pub = 'Yes/No (y / n)'
 
-function inputPass(query) {
+function public_or_private() {
+  return new Promise((resolve, reject) => {
+    rl.question(chalk.green(`Step 2. ${question}\n. ${pub}\n`), (answer) => {
+      let val
+      if (answer === 'Y' || answer === 'y' || answer === 'Yes' || answer === 'yes') {
+        val = true
+      } else if (answer === 'N' || answer === 'n' || answer === 'No' || answer === 'no') {
+        val = false
+      } else {
+        console.log('Invalid input. Please enter Y or N.')
+        return resolve(public_or_private())
+      }
+
+      console.log(`Public node: ${val}`)
+      resolve(val)
+    });
+  });
+}
+
+function input_pass(query) {
     return new Promise((resolve) => {
 
         // Hide the password input
