@@ -3,7 +3,7 @@ const EventEmitter = require('bare-events')
 const { Wallet, NodeWallet } = require('./wallet')
 const { Network } = require('./network')
 const { load, limit, save } = require('./storage')
-const {hash} = require('./utils')
+const {hash, chunk_array, sleep} = require('./utils')
 const chalk = require('chalk');
 
 class HuginNode extends EventEmitter {
@@ -52,6 +52,16 @@ class HuginNode extends EventEmitter {
           console.log(chalk.red("Invalid request command, ban user"))
           this.network.ban(info, conn)
           return
+      }
+
+      if (response.length > 500) {
+        const parts = chunk_array(pool, 500)
+        for (const response of parts) {
+          conn.write(JSON.stringify({response, id: data.id, chunks: true}))
+          await sleep(50)
+        }
+        conn.write(JSON.stringify({id: data.id, done: true}))
+        return
       }
       conn.write(JSON.stringify({response, id: data.id}))
       return

@@ -38,6 +38,14 @@ function toHex(str) {
   return result;
 }
 
+function chunk_array(array, size) {
+  const result = [];
+  for (let i = 0; i < array.length; i += size) {
+    result.push(array.slice(i, i + size));
+  }
+  return result;
+}
+
 async function hash(text) {
   return await crypto.cn_fast_hash(toHex(text))
 }
@@ -55,4 +63,4 @@ function parse(data) {
 }
 
 
-module.exports={get_new_peer_keys, create_keys_from_seed, hash, parse, sleep}
+module.exports={get_new_peer_keys, create_keys_from_seed, hash, parse, sleep, chunk_array}
