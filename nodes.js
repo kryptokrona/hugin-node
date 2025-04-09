@@ -20,7 +20,7 @@ class HuginNode extends EventEmitter {
     // If we have a private node
     // Hash our private key to get a determenistic dht key pair.
     const seed = pub ? '' : await hash(Wallet.spendKey())
-    
+
     this.network = new Network(seed)
     this.pool = await load()
     this.network.node(NodeWallet.viewkey)
@@ -43,7 +43,9 @@ class HuginNode extends EventEmitter {
 
   async node_message(data, info, conn) {
     if ('signal' in data) {
-      if (!this.add(data.message)) {
+      const add = await this.add(data.message)
+      if (!add.success) {
+        console.log("Failed to add message:", add.reason)
         console.log(chalk.red("Invalid node signal message, ban node"))
         this.network.ban(info, conn)
       }
@@ -62,23 +64,29 @@ class HuginNode extends EventEmitter {
       if (response.length > 500) {
         const parts = chunk_array(pool, 500)
         for (const response of parts) {
-          conn.write(JSON.stringify({response, id: data.id, chunks: true}))
-          await sleep(50)
+          this.send(conn,{response, id: data.id, chunks: true})
+          await sleep(20)
         }
-        conn.write(JSON.stringify({id: data.id, done: true}))
+        this.send(conn,{id: data.id, done: true})
         return
       }
-      conn.write(JSON.stringify({response, id: data.id}))
+      this.send(conn,{response, id: data.id})
       return
     }
 
     if ('type' in data) {
       if (data.type === 'post') {
-      if (!await this.post(data.message)) {
-        console.log(chalk.red("Invalid post request"))
-        this.network.ban(info, conn)
+      const added = await this.post(data.message)
+      if (added.success) {
+        this.send(conn,{success: true, id: data.timestamp})
+        return
+      } else if (!added.success) {
+        this.send(conn,{reason: added.reason, success: false, id: data.timestamp})
         return
       }
+      console.log(chalk.red("Invalid post request"))
+      this.network.ban(info, conn)
+      return
      }
     }
   }
@@ -87,30 +95,23 @@ class HuginNode extends EventEmitter {
       this.network.signal(message)
   }
 
-  // Verify that the message is allowed to be sent to the network.
-  async verify(message) {
-    if (!this.check(message)) return false
-    if (!await Wallet.verify(message.cipher + message.hash, message.pub, message.signature)) return false
-    if (!await NodeWallet.verify(message.pub)) return false
-    if (await limit(message.pub)) return false
-    return true
-  }
-
   //From a client, gossip to other nodes.
   async post(message) {
-    if (!await this.add(message)) return false
+    const add = await this.add(message)
+    if (!add.success) return add
     this.gossip(message)
-    return true
+    return add
   }
 
   //From a node
   async add(message) {
-    if (!await this.verify(message)) return false
-    if (this.pool.some(a => a.hash == message.hash)) return true
+    const verify = await this.verify(message)
+    if (!verify.success) return verify
+    if (this.pool.some(a => a.hash == message.hash)) return {success: true}
     this.pool.push(message)
     console.log(chalk.yellow("Pool update. Number of messages:", this.pool.length))
     save(message)
-    return true
+    return verify
   }
 
   // Got a request from client
@@ -123,6 +124,27 @@ class HuginNode extends EventEmitter {
       .sort((a, b) => a.timestamp - b.timestamp);
     }
   }
+
+    // Verify that the message is allowed to be sent to the network.
+    async verify(message) {
+      if (!this.check(message)) {
+        return {success: false, reason: 'Message check failed.'}
+      }
+      if (!await Wallet.verify(message.cipher + message.hash, message.pub, message.signature)) {
+       return {success: false, reason: 'Signature error.'}
+      }
+      if (!await NodeWallet.verify(message.pub)) {
+        return {success: false, reason: 'Not verified.'}
+      }
+      if (await limit(message.pub)) {
+        return {success: false, reason: 'Limit reached.'}
+      }
+      return {success: true, reason: ''}
+    }
+
+    send(conn, data) {
+      conn.write(JSON.stringify(data))
+    }
 
   check(message) {
       if (typeof message.cipher !== 'string') return false
