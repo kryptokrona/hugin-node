@@ -3,7 +3,7 @@
 A Hugin node interface in javascript.
 Verifies that a registered public key is allowed to send messages over the network.
 
-All lower level operations such as sockets/crypto/DB are written in C/C++.
+All lower level modules such as sockets/crypto/DB are written in C/C++.
 
 
 # Getting Started

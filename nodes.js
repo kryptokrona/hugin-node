@@ -207,7 +207,7 @@ class HuginNode extends EventEmitter {
 
   limit(pub) {
     const number = this.pool.filter(m => m.pub === pub);
-    return number > DAY_LIMIT
+    return number.length > DAY_LIMIT
   }
 
 }
