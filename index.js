@@ -6,7 +6,10 @@ const fs = require('fs');
 const { HuginNode } = require('./nodes');
 const { sleep } = require('./utils');
 
+const HUGIN_VERSION = '1.0.0'
+
 async function start_check() {
+  console.log(chalk.green("You are running Hugin Node version", HUGIN_VERSION))
   if (!fs.existsSync('./db')) {
       fs.mkdirSync('./db');
 
@@ -16,10 +19,17 @@ async function start_check() {
   } 
 }
 
+const rl = readline.createInterface({
+  input: process.stdin,
+  output: process.stdout
+});
+
+
 async function start(pub) {
   const node = new HuginNode()
   await node.init(pub)
   //More events here?
+  commands(node)
 }
 
 async function login(retry = false) {
@@ -41,9 +51,10 @@ async function login(retry = false) {
   }
   
   const pub = await public_or_private()
-
+  
+  rl.close()
+  
   start(pub)
-
 }
 
 async function init() {
@@ -73,25 +84,62 @@ async function init() {
   
   //Create wallet
   console.log(chalk.blue("Loading...."))
+  
   await sleep(200)
 
   const pub = await public_or_private()
+  
+  
+  rl.close()
 
   console.log(chalk.magenta('🎉 Setup complete! You are ready to go.'));
 
   start(pub)
-
 }
-const rl = readline.createInterface({
-  input: process.stdin,
-  output: process.stdout
-});
+
+async function commands(node) {
+ 
+  const com = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  });
+
+  function handle(command) {
+    switch (command) {
+      case 'stats':
+        // More stats?
+        console.log(chalk.blue.bold(':::::::::::::::::::::::'))
+        console.log(chalk.blue.bold(':::::::::STATS:::::::::'))
+        console.log(`${chalk.green('Active clients:')} ${chalk.yellow(node.network.clients.length)}`)
+        console.log(`${chalk.green('Nodes:')} ${chalk.yellow(node.network.nodes.length)}`)
+        console.log(`${chalk.green('Messages in Pool:')} ${chalk.yellow(node.pool.length)}`)
+        console.log(chalk.blue.bold(':::::::::::::::::::::::'))
+        console.log(chalk.blue.bold(':::::::::::::::::::::::'))
+        //Number of relayed messages?
+
+        break;
+  
+      case 'info':
+        //Do something for info
+        console.log('Running hugin node version', HUGIN_VERSION)
+        break;
+  
+      default:
+        console.log(`Unknown command: ${command}`)
+    }
+  }
+
+  com.on('line', (input) => {
+    handle(input);
+  });
+}
 
 const question = 'Is this a public node?'
-const pub = 'Yes/No (y / n)'
+const pub = 'yes/no'
 
 function public_or_private() {
   return new Promise((resolve, reject) => {
+
     rl.question(chalk.green(`Step 2. ${question}\n. ${pub}\n`), (answer) => {
       let val
       if (answer === 'Y' || answer === 'y' || answer === 'Yes' || answer === 'yes') {
@@ -103,7 +151,6 @@ function public_or_private() {
         return resolve(public_or_private())
       }
 
-      console.log(`Public node: ${val}`)
       resolve(val)
     });
   });
@@ -112,19 +159,17 @@ function public_or_private() {
 function input_pass(query) {
     return new Promise((resolve) => {
 
-        // Hide the password input
-        const stdin = process.openStdin();
-        if (stdin.isTTY) stdin.setRawMode(true);
-
         let password = '';
-        process.stdin.on('data', (char) => {
+        let done = false
+        rl.input.on('data', (char) => {
+          if (done) return
             char = char.toString();
             switch (char) {
                 case '\n':
                 case '\r':
-                    stdin.setRawMode(false);
                     console.log('');
                     resolve(password);
+                    done = true
                     break;
                 case '\x03':
                     process.exit();

@@ -7,7 +7,7 @@ const { Wallet } = require('./wallet');
 class Network extends EventEmitter {
   constructor(seed) {
     super()
-    this.keys = create_keys_from_seed(seed) //Seed from private xkr wallet. For private nodes.
+    this.keys = create_keys_from_seed(seed) //Deterministic dht keys.
     this.nodes = []
     this.clients = []
   }
@@ -16,13 +16,11 @@ async swarm(key, priv = false, pub = false) {
   let [base_keys, dhtKeys, sig] = get_new_peer_keys(key)
   const topicHash = base_keys.publicKey.toString('hex')
   const server = priv || pub
-  const dht_keys = priv ? this.keys : dhtKeys
-  let swarm
-
-  if (priv) {
+  const dht_keys = server ? this.keys : dhtKeys
+  if (server) {
     sig =  base_keys.get().sign(dht_keys.get().publicKey)
   }
-
+  let swarm
   try {
      swarm = new Hyperswarm({}, sig, dht_keys, base_keys)
   } catch (e) {
@@ -49,7 +47,7 @@ async swarm(key, priv = false, pub = false) {
   await discovery.flushed()
 }
 
-// Node is connected to other nodes.
+// Node is connected to other nodes. 
 
 async node (key) {
   console.log(chalk.green("Network started ✅"))
@@ -57,8 +55,7 @@ async node (key) {
 
 }
 
-//Private node handles clients
-
+//Private node handles invited clients. Address is private.
 async private_node(key) {
   console.log(chalk.green("Node started ✅"))
   console.log("")
@@ -72,8 +69,7 @@ async private_node(key) {
 }
 
 
-//Private node handles clients
-
+//Public node handles clients. Address is public.
 async public_node(key) {
   console.log("")
   console.log(chalk.cyan("...................."))
@@ -83,16 +79,16 @@ async public_node(key) {
   return await this.swarm(key, false, true)
 }
 
-
-
-
 node_connection(conn, info) {
   console.log(chalk.green("New node connection"))
   this.nodes.push({conn, info})
   conn.on('data', (d) => {
     const m = d.toString()
     const data = parse(m)
-    if (!data) return
+    if (!data) {
+      this.ban(info, conn)
+      return
+    }
     this.emit('node-data', {conn, info, data})
   })
   conn.on('error',() => {
@@ -106,10 +102,16 @@ async client_connection(conn, info) {
   console.log(chalk.green("Incoming client connection"))
   this.clients.push({conn, info})
   conn.on('data', (d) => {
-    if (d.length > 5000) return
+    if (d.length > 5000) {
+        this.ban(info, conn)
+        return
+    }
     const m = d.toString()
     const data = parse(m)
-    if (!data) return
+    if (!data) {
+      this.ban(info, conn)
+      return
+    }
     this.emit('client-data', {conn, info, data})
   })
   conn.on('error',() => {
@@ -130,6 +132,11 @@ ban(info, conn) {
   info.ban(true)
   conn.end()
   conn.destroy()
+}
+
+timeout(info, conn) {
+  this.ban(info, conn)
+  setTimeout(() => info.ban(false), 60000)
 }
 
 }

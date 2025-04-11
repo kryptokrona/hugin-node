@@ -5,6 +5,7 @@ const { Network } = require('./network')
 const { load, limit, save } = require('./storage')
 const {hash, chunk_array, sleep} = require('./utils')
 const chalk = require('chalk');
+const { ONE_DAY, DAY_LIMIT, SIGNATURE_ERROR, WRONG_MESSAGE_FORMAT, MESSAGE_VERIFIED, LIMIT_REACHED, NOT_VERIFIED } = require('./constants')
 
 class HuginNode extends EventEmitter {
   
@@ -15,12 +16,9 @@ class HuginNode extends EventEmitter {
   }
 
   async init(pub = false) {
+    // Hash our private key to get a deterministic dht key pair.
     // This can be used as a trust system for stable nodes in the future?
-    
-    // If we have a private node
-    // Hash our private key to get a determenistic dht key pair.
-    const seed = pub ? '' : await hash(Wallet.spendKey())
-
+    const seed = await hash(Wallet.spendKey())
     this.network = new Network(seed)
     this.pool = await load()
     this.network.node(NodeWallet.viewkey)
@@ -39,6 +37,30 @@ class HuginNode extends EventEmitter {
       console.log(chalk.white("......................................."))
       console.log(chalk.yellow("........Waiting for connections........"))
       console.log(chalk.white("......................................."))
+
+    process.on('SIGTERM', async () => {
+      console.log(chalk.red("Closing node..."))
+      await this.save_pool()
+      console.log("Closed.")
+      process.exit(0);
+    });
+    
+    process.on('SIGINT', async () => {
+      console.log(chalk.red("Closing node..."))
+      await this.save_pool()
+      console.log("Closed.")
+      process.exit(0);
+    });
+
+    setInterval( async () => this.cleaner(), 600000);
+  }
+
+  async save_pool() {
+    for (const message of this.pool) {
+      await save(message)
+    }
+    
+    console.log(chalk.green("Saved messages from pool."))
   }
 
   async node_message(data, info, conn) {
@@ -76,12 +98,14 @@ class HuginNode extends EventEmitter {
 
     if ('type' in data) {
       if (data.type === 'post') {
-      const added = await this.post(data.message)
-      if (added.success) {
+      const post = await this.post(data.message)
+      if (post.success) {
         this.send(conn,{success: true, id: data.timestamp})
         return
-      } else if (!added.success) {
-        this.send(conn,{reason: added.reason, success: false, id: data.timestamp})
+      } else if (!post.success) {
+        this.send(conn,{reason: post.reason, success: false, id: data.timestamp})
+        //Temp ban user for one minute.
+        this.network.timeout(info, conn)
         return
       }
       console.log(chalk.red("Invalid post request"))
@@ -105,12 +129,13 @@ class HuginNode extends EventEmitter {
 
   //From a node
   async add(message) {
+    //Ensure that we set the recieved timestamp as now.
+    message.timestamp = Date.now()
     const verify = await this.verify(message)
     if (!verify.success) return verify
     if (this.pool.some(a => a.hash == message.hash)) return {success: true}
     this.pool.push(message)
     console.log(chalk.yellow("Pool update. Number of messages:", this.pool.length))
-    save(message)
     return verify
   }
 
@@ -128,18 +153,18 @@ class HuginNode extends EventEmitter {
     // Verify that the message is allowed to be sent to the network.
     async verify(message) {
       if (!this.check(message)) {
-        return {success: false, reason: 'Message check failed.'}
+        return WRONG_MESSAGE_FORMAT
       }
       if (!await Wallet.verify(message.cipher + message.hash, message.pub, message.signature)) {
-       return {success: false, reason: 'Signature error.'}
+       return SIGNATURE_ERROR
       }
       if (!await NodeWallet.verify(message.pub)) {
-        return {success: false, reason: 'Not verified.'}
+        return NOT_VERIFIED
       }
-      if (await limit(message.pub)) {
-        return {success: false, reason: 'Limit reached.'}
+      if (this.limit(message.pub)) {
+        return LIMIT_REACHED
       }
-      return {success: true, reason: ''}
+      return MESSAGE_VERIFIED
     }
 
     send(conn, data) {
@@ -170,6 +195,19 @@ class HuginNode extends EventEmitter {
     if (req.timestamp.length > 30) return false
 
     return true
+  }
+
+  cleaner() {
+    const now = Date.now()
+    const clean = this.pool.filter(m => {
+      return m.timestamp && m.timestamp > (now - ONE_DAY);
+    });
+    this.pool = clean
+  }
+
+  limit(pub) {
+    const number = this.pool.filter(m => m.pub === pub);
+    return number > DAY_LIMIT
   }
 
 }

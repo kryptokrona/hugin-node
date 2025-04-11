@@ -1,10 +1,9 @@
 
 const HyperDB = require('hyperdb')
-const def = require('./spec/hyperdb/index.js')
+const def = require('./spec/hyperdb/index.js');
+const { DAY_LIMIT, ONE_DAY } = require('./constants.js');
 
 const db = HyperDB.rocks('./db/messages.db', def)
-const DAY_LIMIT = 100
-const ONE_DAY = 24 * 60 * 60 * 1000;
 /**
  * Verify limit of this sender.
  * @param {string} pubKey - The public key of the sender.
@@ -27,8 +26,7 @@ async function limit(pubKey) {
 
 /**
  * Add a new message to the database.
- * @param {string} cipher - The encrypted message.
- * @param {string} pub - The public key of the sender.
+ * @param {string} message - The message object.
  * @returns {Promise<void>}
  */
 async function save(message) {

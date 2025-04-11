@@ -36,8 +36,6 @@ async import() {
     if (!this.wallet) return
     this.txs = []
     for (const tx of await this.wallet.getTransactions()) {
-      console.log(`Transaction ${tx.hash} - ${WB.prettyPrintAmount(tx.totalAmount())} - ${tx.timestamp}`);
-      console.log("Whole tx:", tx)
       this.txs.push(tx)
     }
   }
