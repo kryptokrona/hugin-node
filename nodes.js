@@ -155,11 +155,11 @@ class HuginNode extends EventEmitter {
       if (!this.check(message)) {
         return WRONG_MESSAGE_FORMAT
       }
-      if (!await Wallet.verify(message.cipher + message.hash, message.pub, message.signature)) {
-       return SIGNATURE_ERROR
-      }
       if (!await NodeWallet.verify(message.pub)) {
         return NOT_VERIFIED
+      }
+      if (!await Wallet.verify(message.cipher + message.hash, message.pub, message.signature)) {
+       return SIGNATURE_ERROR
       }
       if (this.limit(message.pub)) {
         return LIMIT_REACHED
@@ -178,7 +178,7 @@ class HuginNode extends EventEmitter {
       if (typeof message.timestamp !== 'number') return false
       if (typeof message.signature !== 'string') return false
 
-      if (message.cipher.length > 2048) return false
+      if (message.cipher.length > 3048) return false
       if (message.hash.length > 64) return false
       if (message.pub.length !== 64) return false
       if (message.timestamp.length > 30) return false
