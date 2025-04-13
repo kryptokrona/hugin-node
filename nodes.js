@@ -105,6 +105,7 @@ class HuginNode extends EventEmitter {
       } else if (!post.success) {
         this.send(conn,{reason: post.reason, success: false, id: data.message.id})
         //Temp ban user for one minute.
+        await sleep(500)
         this.network.timeout(info, conn)
         return
       }
