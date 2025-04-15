@@ -104,7 +104,7 @@ async function commands(node) {
     output: process.stdout
   });
 
-  function handle(command) {
+  async function handle(command) {
     switch (command) {
       case 'stats':
         // More stats?
@@ -123,6 +123,20 @@ async function commands(node) {
         //Do something for info
         console.log('Running hugin node version', HUGIN_VERSION)
         break;
+
+        case 'backup':
+          //Do something for info
+          console.log(chalk.blue.bold('::::::::::::::::::::::::'))
+          console.log(chalk.blue.bold(':::::::::BACKUP:::::::::'))
+          console.log(chalk.blue.bold('............'))
+          console.log('Wallet seed:')
+          console.log(chalk.blue.bold('............'))
+          const [seed, error] =  await Wallet.wallet.getMnemonicSeed()
+          console.log(seed)
+          console.log(chalk.blue.bold('::::::::::::::::::::::::'))
+          console.log(chalk.blue.bold('::::::::::::::::::::::::'))
+
+          break;
   
       default:
         console.log(`Unknown command: ${command}`)
