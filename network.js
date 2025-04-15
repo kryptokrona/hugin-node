@@ -3,6 +3,7 @@ const Hyperswarm = require('hyperswarm-hugin')
 const { create_keys_from_seed, get_new_peer_keys, parse } = require('./utils')
 const chalk = require('chalk');
 const { Wallet } = require('./wallet');
+const { NODE_VERSION } = require('./constants');
 
 class Network extends EventEmitter {
   constructor(seed) {
@@ -57,7 +58,7 @@ async node (key) {
 
 //Private node handles invited clients. Address is private.
 async private_node(key) {
-  console.log(chalk.green("Node started ✅"))
+  console.log(chalk.green("Private node started ✅"))
   console.log("")
   console.log(chalk.cyan("...................."))
   console.log('NODE PRIVATE ADDRESS:');
@@ -75,6 +76,11 @@ async public_node(key) {
   console.log(chalk.cyan("...................."))
   console.log(chalk.green("Public node started ✅"))
   console.log(chalk.cyan("...................."))
+  console.log('NODE PUBLIC ADDRESS:');
+  console.log(chalk.cyan("...................."))
+  console.log("")
+  console.log(chalk.white(Wallet.address + this.keys.publicKey.toString('hex')))
+  console.log("")
   console.log("")
   return await this.swarm(key, false, true)
 }
@@ -82,6 +88,9 @@ async public_node(key) {
 node_connection(conn, info) {
   console.log(chalk.green("New node connection"))
   this.nodes.push({conn, info})
+
+  // Send node version to other nodes
+  conn.write(JSON.stringify({version: NODE_VERSION}))
   conn.on('data', (d) => {
     const m = d.toString()
     const data = parse(m)
@@ -103,7 +112,7 @@ async client_connection(conn, info) {
   console.log(chalk.green("Incoming client connection"))
   this.clients.push({conn, info})
   //Send our node wallet address to client.
-  conn.write(JSON.stringify({address: Wallet.address}))
+  conn.write(JSON.stringify({address: Wallet.address, version: NODE_VERSION}))
 
   conn.on('data', (d) => {
     if (d.length > 5000) {
