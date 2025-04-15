@@ -95,12 +95,16 @@ node_connection(conn, info) {
     console.log("Got error connection signal")
     conn.end()
     conn.destroy()
+    this.nodes = this.nodes.filter(a => a.info !== info)
   })
 }
 
 async client_connection(conn, info) {
   console.log(chalk.green("Incoming client connection"))
   this.clients.push({conn, info})
+  //Send our node wallet address to client.
+  conn.write(JSON.stringify({address: Wallet.address}))
+
   conn.on('data', (d) => {
     if (d.length > 5000) {
         this.ban(info, conn)
@@ -117,6 +121,7 @@ async client_connection(conn, info) {
   conn.on('error',() => {
     conn.end()
     conn.destroy()
+    this.clients = this.clients.filter(a => a.info !== info)
   })
 }
 
