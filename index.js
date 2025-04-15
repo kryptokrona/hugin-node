@@ -5,11 +5,10 @@ const {Wallet, NodeWallet} = require('./wallet')
 const fs = require('fs');
 const { HuginNode } = require('./nodes');
 const { sleep } = require('./utils');
-
-const HUGIN_VERSION = '1.0.0'
+const { NODE_VERSION } = require('./constants');
 
 async function start_check() {
-  console.log(chalk.green("You are running Hugin Node version", HUGIN_VERSION))
+  console.log(chalk.green("You are running Hugin Node version", NODE_VERSION))
   if (!fs.existsSync('./db')) {
       fs.mkdirSync('./db');
 
@@ -82,13 +81,17 @@ async function init() {
       console.log(chalk.red("Error importing node wallet."))
   }
   
-  //Create wallet
-  console.log(chalk.blue("Loading...."))
-  
   await sleep(200)
 
   const pub = await public_or_private()
-  
+
+  const paymentAddr = await payments()
+
+  const auto = await autopay()
+
+  console.log(chalk.blue("Loading...."))
+
+  Wallet.payments(paymentAddr, auto)
   
   rl.close()
 
@@ -106,37 +109,25 @@ async function commands(node) {
 
   async function handle(command) {
     switch (command) {
+      
       case 'stats':
-        // More stats?
-        console.log(chalk.blue.bold(':::::::::::::::::::::::'))
-        console.log(chalk.blue.bold(':::::::::STATS:::::::::'))
-        console.log(`${chalk.green('Active clients:')} ${chalk.yellow(node.network.clients.length)}`)
-        console.log(`${chalk.green('Nodes:')} ${chalk.yellow(node.network.nodes.length)}`)
-        console.log(`${chalk.green('Messages in Pool:')} ${chalk.yellow(node.pool.length)}`)
-        console.log(chalk.blue.bold(':::::::::::::::::::::::'))
-        console.log(chalk.blue.bold(':::::::::::::::::::::::'))
-        //Number of relayed messages?
-
+          SHOW_STATS(node)
         break;
   
       case 'info':
-        //Do something for info
-        console.log('Running hugin node version', HUGIN_VERSION)
+        SHOW_INFO(node)
         break;
 
-        case 'backup':
-          //Do something for info
-          console.log(chalk.blue.bold('::::::::::::::::::::::::'))
-          console.log(chalk.blue.bold(':::::::::BACKUP:::::::::'))
-          console.log(chalk.blue.bold('............'))
-          console.log('Wallet seed:')
-          console.log(chalk.blue.bold('............'))
-          const [seed, error] =  await Wallet.wallet.getMnemonicSeed()
-          console.log(seed)
-          console.log(chalk.blue.bold('::::::::::::::::::::::::'))
-          console.log(chalk.blue.bold('::::::::::::::::::::::::'))
+      case 'backup':
+        BACKUP_WALLET()
+        break;
 
-          break;
+        case 'payout':
+          console.log(chalk.blue.bold('Creating manual payout transaction...'))
+          Wallet.payout()
+        break;
+
+
   
       default:
         console.log(`Unknown command: ${command}`)
@@ -169,6 +160,31 @@ function public_or_private() {
     });
   });
 }
+
+function payments() {
+  return new Promise((resolve, reject) => {
+
+    rl.question(chalk.green(`Step 3. Choose a payout address: \n`), (answer) => {
+      if (answer.startsWith('SEKR') && answer.length === 99) {
+        resolve(answer)
+      } else {
+        console.log(chalk.red("Wrong address format."))
+        return payments()
+      }
+   
+    });
+  });
+}
+
+
+function autopay() {
+  return new Promise((resolve, reject) => { 
+    rl.question(chalk.green(`Do you want automatic payments to this address? Press Enter.`), (answer) => { 
+      if (answer.length === 0) resolve(true)
+      else resolve(false)
+    })
+  })
+ }
 
 function input_pass(query) {
     return new Promise((resolve) => {
@@ -219,5 +235,49 @@ ${chalk.white('███████║██║   ██║██║  ███
 ${chalk.white('██╔══██║██║   ██║██║   ██║██║██║╚██╗██║')}
 ${chalk.white('██║  ██║╚██████╔╝╚██████╔╝██║██║ ╚████║')}
 ${chalk.white('╚═╝  ╚═╝ ╚═════╝  ╚═════╝ ╚═╝╚═╝  ╚═══╝')}`
+
+
+const SHOW_INFO = (node) => {
+  console.log(chalk.blue.bold('::::::::::::::::::::::'))
+  console.log(chalk.blue.bold(':::::::::INFO:::::::::'))
+  console.log('Running hugin node version', NODE_VERSION)
+  console.log(chalk.blue.bold('............'))
+  console.log(chalk.green('Node address:'))
+  console.log(Wallet.address + node.network.keys.publicKey.toString('hex'))
+  console.log(chalk.blue.bold('............'))
+  console.log(chalk.green('Payout address:'))
+  console.log(Wallet.paymentAddress)
+  console.log(chalk.blue.bold('............'))
+  console.log(chalk.green('Auto payments:'))
+  console.log(Wallet.autoPay)
+  console.log(chalk.blue.bold('::::::::::::::::::::::'))
+  console.log(chalk.blue.bold('::::::::::::::::::::::'))
+}
+
+const BACKUP_WALLET = async () => {
+  //Do something for info
+  console.log(chalk.blue.bold('::::::::::::::::::::::::'))
+  console.log(chalk.blue.bold(':::::::::BACKUP:::::::::'))
+  console.log(chalk.blue.bold('............'))
+  console.log('Wallet seed:')
+  console.log(chalk.blue.bold('............'))
+  const [seed, error] =  await Wallet.wallet.getMnemonicSeed()
+  console.log(seed)
+  console.log(chalk.blue.bold('::::::::::::::::::::::::'))
+  console.log(chalk.blue.bold('::::::::::::::::::::::::'))
+}
+
+const SHOW_STATS = async (node) => {
+   // More stats?
+   console.log(chalk.blue.bold(':::::::::::::::::::::::'))
+   console.log(chalk.blue.bold(':::::::::STATS:::::::::'))
+   console.log(`${chalk.green('Active clients:')} ${chalk.yellow(node.network.clients.length)}`)
+   console.log(`${chalk.green('Nodes:')} ${chalk.yellow(node.network.nodes.length)}`)
+   console.log(`${chalk.green('Messages in Pool:')} ${chalk.yellow(node.pool.length)}`)
+   console.log(`${chalk.green('Node balance:')} ${chalk.yellow(parseInt(await Wallet.wallet.getBalance()) / 100000)} XKR`)
+   console.log(chalk.blue.bold(':::::::::::::::::::::::'))
+   console.log(chalk.blue.bold(':::::::::::::::::::::::'))
+   //Number of relayed messages?
+}
 
 start_check()
