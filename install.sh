@@ -63,10 +63,21 @@ if ! command -v git >/dev/null 2>&1; then
     exit 1
 fi
 
-# Check for Python 3
+# Check for Python 3 or Python
 if command -v python3 >/dev/null 2>&1; then
     PYTHON_VERSION=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
-    info "Detected Python version: $PYTHON_VERSION"
+    info "Detected Python version (via python3): $PYTHON_VERSION"
+    MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+    MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+
+    if [ "$MAJOR" -lt 3 ] || { [ "$MAJOR" -eq 3 ] && [ "$MINOR" -lt 6 ]; }; then
+        warn "Python version is lower than 3.6 — you might encounter problems."
+    else
+        success "Python 3 is installed and recent enough."
+    fi
+elif command -v python >/dev/null 2>&1; then
+    PYTHON_VERSION=$(python -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+    info "Detected Python version (via python): $PYTHON_VERSION"
     MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
     MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
 
@@ -76,7 +87,7 @@ if command -v python3 >/dev/null 2>&1; then
         success "Python 3 is installed and recent enough."
     fi
 else
-    warn "Python3 is not installed."
+    warn "Neither python nor python3 is installed."
     printf "${YELLOW}Do you want to install Python3? (y/n): ${NC}"
     read INSTALL_PYTHON
     if [ "$INSTALL_PYTHON" = "y" ] || [ "$INSTALL_PYTHON" = "Y" ]; then
@@ -94,6 +105,7 @@ else
         exit 1
     fi
 fi
+
 
 
 # Clone the repo
