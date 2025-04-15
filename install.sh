@@ -37,24 +37,79 @@ else
     warn "Node.js is not installed."
 fi
 
-if [ "$NODE_VERSION" -lt 16 ]; then
-    printf "${YELLOW}Node.js is missing or too old (need >=16). Do you want to install it? (y/n): ${NC}"
-    read INSTALL_NODE
-    if [ "$INSTALL_NODE" = "y" ] || [ "$INSTALL_NODE" = "Y" ]; then
-        if echo "$OSTYPE" | grep -q "linux"; then
-            curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
-            sudo apt-get install -y nodejs
-        elif echo "$OSTYPE" | grep -q "darwin"; then
-            brew install node
+# Handle Node.js installation using NVM, or nvm-windows for Windows users
+
+# Check if we are on Windows
+if echo "$OSTYPE" | grep -q "cygwin" || echo "$OSTYPE" | grep -q "mingw"; then
+    # Special case for Windows with nvm-windows
+    if ! command -v nvm >/dev/null 2>&1; then
+        printf "${YELLOW}nvm-windows is not installed. Do you want to install it? (y/n): ${NC}"
+        read INSTALL_NVM_WINDOWS
+        if [ "$INSTALL_NVM_WINDOWS" = "y" ] || [ "$INSTALL_NVM_WINDOWS" = "Y" ]; then
+            info "Please download and install nvm-windows from https://github.com/coreybutler/nvm-windows/releases."
+            success "Please restart the terminal after installation."
+            exit 1
         else
-            error "Unknown OS or Windows detected. Please install Node.js manually from https://nodejs.org/"
+            error "nvm-windows installation skipped. Exiting."
             exit 1
         fi
-        success "Node.js installed."
-    else
-        error "Node.js installation skipped. Exiting."
-        exit 1
     fi
+
+    # If nvm-windows is installed, install Node.js version >= 18
+    if [ "$NODE_VERSION" -lt 18 ]; then
+        printf "${YELLOW}Node.js version is too old or missing. Do you want to install the latest stable version using nvm-windows? (y/n): ${NC}"
+        read INSTALL_NODE
+        if [ "$INSTALL_NODE" = "y" ] || [ "$INSTALL_NODE" = "Y" ]; then
+            nvm install latest
+            nvm use latest
+            success "Node.js installed using nvm-windows."
+        else
+            error "Node.js installation skipped. Exiting."
+            exit 1
+        fi
+    fi
+else
+    # For Linux/macOS users
+    if [ "$NODE_VERSION" -lt 18 ]; then
+        # Check if nvm is installed
+        if ! command -v nvm >/dev/null 2>&1; then
+            printf "${YELLOW}nvm (Node Version Manager) is not installed. Do you want to install it? (y/n): ${NC}"
+            read INSTALL_NVM
+            if [ "$INSTALL_NVM" = "y" ] || [ "$INSTALL_NVM" = "Y" ]; then
+                # Install nvm
+                curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.3/install.sh | bash
+                # Load nvm (it should be done in the profile, but just to be safe, we do it here)
+                export NVM_DIR="$HOME/.nvm"
+                [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
+                success "nvm installed."
+            else
+                error "nvm installation skipped. Exiting."
+                exit 1
+            fi
+        fi
+
+        # Install Node.js using nvm if not installed or too old
+        if [ "$NODE_VERSION" -lt 18 ]; then
+            printf "${YELLOW}Node.js version is too old or missing. Do you want to install the latest stable version using nvm? (y/n): ${NC}"
+            read INSTALL_NODE
+            if [ "$INSTALL_NODE" = "y" ] || [ "$INSTALL_NODE" = "Y" ]; then
+                nvm install stable
+                nvm use stable
+                success "Node.js installed using nvm."
+            else
+                error "Node.js installation skipped. Exiting."
+                exit 1
+            fi
+        fi
+    else
+        success "Node.js is up to date."
+    fi
+fi
+
+# Ensure nvm is loaded for the current shell session
+if [ -n "$NVM_DIR" ]; then
+    export NVM_DIR="$HOME/.nvm"
+    [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
 fi
 
 # Check if git is installed
@@ -118,9 +173,9 @@ if echo "$OSTYPE" | grep -q "linux" || echo "$OSTYPE" | grep -q "darwin"; then
 
     if [ "$AUTOSTART" = "y" ] || [ "$AUTOSTART" = "Y" ]; then
         if [ "$USE_SCREEN" = true ]; then
-            CRON_JOB="@reboot cd $WORKDIR/hugin-node && screen -dmS hugin-node npm run start"
+            CRON_JOB="@reboot export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && \. \"$NVM_DIR/nvm.sh\" && cd $WORKDIR/hugin-node && screen -dmS hugin-node npm run start"
         else
-            CRON_JOB="@reboot cd $WORKDIR/hugin-node && npm run start"
+            CRON_JOB="@reboot export NVM_DIR=\"$HOME/.nvm\" && [ -s \"$NVM_DIR/nvm.sh\" ] && \. \"$NVM_DIR/nvm.sh\" && cd $WORKDIR/hugin-node && npm run start"
         fi
         (crontab -l 2>/dev/null | grep -v 'hugin-node'; true) | { cat; echo "$CRON_JOB"; } | crontab -
         success "Autostart added to crontab."
