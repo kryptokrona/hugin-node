@@ -12,6 +12,8 @@ const NOT_VERIFIED = {success: false, reason: 'Not verified.'}
 const LIMIT_REACHED = {success: false, reason: 'Limit reached.'}
 const MESSAGE_VERIFIED = {success: true, reason: ''}
 
-//
+// VERSIONS
 
-module.exports={ONE_DAY, DAY_LIMIT, WRONG_MESSAGE_FORMAT, SIGNATURE_ERROR, NOT_VERIFIED, LIMIT_REACHED, MESSAGE_VERIFIED}
+const NODE_VERSION = '1.0.0'
+
+module.exports={ONE_DAY, DAY_LIMIT, WRONG_MESSAGE_FORMAT, SIGNATURE_ERROR, NOT_VERIFIED, LIMIT_REACHED, MESSAGE_VERIFIED, NODE_VERSION}
