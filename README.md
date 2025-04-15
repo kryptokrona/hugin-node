@@ -8,6 +8,15 @@ All lower level modules such as sockets/crypto/DB are written in C/C++.
 
 # Getting Started
 
+## Quick start script
+```sh
+bash -c "$(curl -fsSL https://raw.githubusercontent.com/kryptokrona/hugin-node/refs/heads/master/install.sh)"
+```
+
+## - OR -
+
+## Manual installation
+
 Make sure you have installed on your system:
 
 - `Node` >= 18.
