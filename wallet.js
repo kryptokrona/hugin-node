@@ -41,7 +41,7 @@ async import() {
   }
 
   async verify(pub) {
-    return this.txs.some(a => a.paymentID === pub && a.totalAmount() >= 9900000)
+    return this.txs.some(a => a.paymentID === pub && a.totalAmount() >= 4900000)
   }
 
 
