@@ -63,7 +63,7 @@ if ! command -v git >/dev/null 2>&1; then
     exit 1
 fi
 
-# Check for Python 3 or Python
+# Check for Python (both python3 and python, plus Windows' `py`)
 if command -v python3 >/dev/null 2>&1; then
     PYTHON_VERSION=$(python3 -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
     info "Detected Python version (via python3): $PYTHON_VERSION"
@@ -86,8 +86,19 @@ elif command -v python >/dev/null 2>&1; then
     else
         success "Python 3 is installed and recent enough."
     fi
+elif command -v py >/dev/null 2>&1; then
+    PYTHON_VERSION=$(py -c 'import sys; print(".".join(map(str, sys.version_info[:2])))')
+    info "Detected Python version (via py): $PYTHON_VERSION"
+    MAJOR=$(echo "$PYTHON_VERSION" | cut -d. -f1)
+    MINOR=$(echo "$PYTHON_VERSION" | cut -d. -f2)
+
+    if [ "$MAJOR" -lt 3 ] || { [ "$MAJOR" -eq 3 ] && [ "$MINOR" -lt 6 ]; }; then
+        warn "Python version is lower than 3.6 — you might encounter problems."
+    else
+        success "Python 3 is installed and recent enough."
+    fi
 else
-    warn "Neither python nor python3 is installed."
+    warn "Neither python, python3, nor py is found."
     printf "${YELLOW}Do you want to install Python3? (y/n): ${NC}"
     read INSTALL_PYTHON
     if [ "$INSTALL_PYTHON" = "y" ] || [ "$INSTALL_PYTHON" = "Y" ]; then
@@ -95,8 +106,11 @@ else
             sudo apt-get update && sudo apt-get install -y python3 python3-pip
         elif echo "$OSTYPE" | grep -q "darwin"; then
             brew install python3
+        elif echo "$OSTYPE" | grep -q "cygwin" || echo "$OSTYPE" | grep -q "mingw"; then
+            info "Please download and install Python from https://www.python.org/downloads/."
+            exit 1
         else
-            error "Please install Python3 manually on your system."
+            error "Unknown operating system detected. Please install Python3 manually."
             exit 1
         fi
         success "Python3 installed."
@@ -105,8 +119,6 @@ else
         exit 1
     fi
 fi
-
-
 
 # Clone the repo
 if [ ! -d "$WORKDIR/hugin-node" ]; then
