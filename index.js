@@ -111,7 +111,7 @@ async function commands(node) {
     switch (command) {
       
       case 'stats':
-          SHOW_STATS(node)
+        SHOW_STATS(node)
         break;
   
       case 'info':

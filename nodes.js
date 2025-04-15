@@ -108,7 +108,7 @@ class HuginNode extends EventEmitter {
      }
     }
 
- async on_message(data, conn) {
+ async on_message(data, conn, info) {
     const post = await this.post(data.message)
     if (post.success) {
       this.send(conn,{success: true, id: data.message.id})
