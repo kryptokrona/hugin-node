@@ -4,6 +4,7 @@ const { Address, CryptoNote } = require('kryptokrona-utils');
 const xkrUtils = new CryptoNote();
 const fs = require('fs');
 const chalk = require('chalk');
+const { parse, sleep } = require('./utils');
 
 class ViewWallet {
   constructor() {
@@ -51,7 +52,6 @@ async import() {
     await this.wallet.start()
     setInterval( async () => save('password', 'nodewallet', this.wallet), 350000);
     this.wallet.on('incomingtx', async (transaction) => {
-      console.log('Incoming tx!', transaction);
       this.txs.push(transaction)
     });
     await this.loadtxs()
@@ -80,6 +80,7 @@ class UserWallet {
     this.address = null;
     this.started = false;
     this.daemon = new WB.Daemon('node.xkr.network', 443);// TODO ** set custom node.
+    this.paymentAddress = ''
   }
 
   async init(password) {
@@ -103,6 +104,14 @@ class UserWallet {
       console.log('Error loading wallet');
       return false;
     }
+
+    const config = await readfile('config')
+    const parsed = parse(config)
+    if (!parsed) {
+      console.log("Error parsing config.")
+    }
+    this.paymentAddress = parsed.paymentAddress
+    this.autoPay = parsed.autoPay
 
     this.wallet = loadedWallet;
     this.address = this.addresses()[0];
@@ -149,11 +158,56 @@ class UserWallet {
     save(password, 'mywallet', this.wallet);
     setInterval( async () => save(password, 'mywallet', this.wallet), 200000);
     //Incoming transaction event
+
+    const [walletCount, daemonCount ,networkCount] = this.wallet.getSyncStatus()
+    if (walletCount === 0) this.wallet.rewind(networkCount - 1000)
+
     this.wallet.on('incomingtx', async (transaction) => {
-      console.log('Incoming tx!');
+      console.log("Incoming tx!")
+      if (this.autoPay) {
+      this.payout()
+      }
       console.log(chalk.green("$ Your node got paid $"))
     });
     return true
+  }
+
+  payments(address, auto = true) {
+
+    const data = {paymentAddress: address, autoPay: auto}
+    this.paymentAddress = address
+    this.autoPay = auto
+    try {
+      fs.writeFileSync('./config.json', JSON.stringify(data))
+     return true
+    } catch(e) {
+      return false
+    }
+  }
+
+  async payout() {
+    if (this.paymentAddress.length !== 99) {
+      console.log(chalk.red("No payment address registered."))
+      return
+    }
+    await sleep(10000);
+    let result = await this.wallet.sendTransactionAdvanced(
+      [[this.paymentAddress, 10000]], // destinations,
+      3, // mixin
+      { fixedFee: 1000, isFixedFee: true }, // fee
+      undefined, //paymentID
+      undefined, // subWalletsToTakeFrom
+      undefined, // changeAddress
+      true, // relayToNetwork
+      true, // sneedAll
+      undefined
+    )
+    if (result.success) {
+      console.log(chalk.green("Payout completed. "))
+      return
+    } else {
+      console.log(chalk.red("Payment error...", result.error))
+    }
   }
   
   }
@@ -172,8 +226,6 @@ class UserWallet {
     return js_wallet
   }
 
-
-
  function save(password, walletname, wallet) {
     const save = wallet.encryptWalletToString(password)
     try {
@@ -184,14 +236,15 @@ class UserWallet {
     }
 }
 
-  async function readfile(wallet) {
+  async function readfile(file) {
     try {
-      const data = fs.readFileSync('./' + wallet + '.json')
+      const data = fs.readFileSync('./' + file + '.json')
       return data.toString()
     } catch (err) {
-      console.log('Json wallet error, try backup wallet file', err)
+      console.log('JError loading file', err)
       return false
   }
+  
   }
 
 
