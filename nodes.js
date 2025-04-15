@@ -75,6 +75,7 @@ class HuginNode extends EventEmitter {
   } 
 
   async client_message(data, info, conn) {
+
     if ('request' in data) {
       const response = this.onrequest(data)
       if (!response) {
@@ -98,23 +99,29 @@ class HuginNode extends EventEmitter {
 
     if ('type' in data) {
       if (data.type === 'post') {
-      const post = await this.post(data.message)
-      if (post.success) {
-        this.send(conn,{success: true, id: data.message.id})
-        return
-      } else if (!post.success) {
-        this.send(conn,{reason: post.reason, success: false, id: data.message.id})
-        //Temp ban user for one minute.
-        await sleep(500)
-        this.network.timeout(info, conn)
-        return
-      }
+        if (await this.on_message(data, conn)) return
+      } else {
       console.log(chalk.red("Invalid post request"))
       this.network.ban(info, conn)
       return
+      }
      }
     }
+
+ async on_message(data, conn) {
+    const post = await this.post(data.message)
+    if (post.success) {
+      this.send(conn,{success: true, id: data.message.id})
+      return true
+    } else if (!post.success) {
+      this.send(conn,{reason: post.reason, success: false, id: data.message.id})
+      //Temp ban user for one minute.
+      await sleep(500)
+      this.network.timeout(info, conn)
+      return false
+    }
   }
+
 
   gossip(message) {
       this.network.signal(message)
