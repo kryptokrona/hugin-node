@@ -168,19 +168,24 @@ else
     USE_SCREEN=true
 fi
 
-# Ask for autostart
-printf "${YELLOW}Do you want to auto-start the node on system startup? (y/n): ${NC}"
-read AUTOSTART
+# Ask for autostart if it's not a Windows system
+if echo "$OSTYPE" | grep -q "linux" || echo "$OSTYPE" | grep -q "darwin"; then
+    printf "${YELLOW}Do you want to auto-start the node on system startup? (y/n): ${NC}"
+    read AUTOSTART
 
-if [ "$AUTOSTART" = "y" ] || [ "$AUTOSTART" = "Y" ]; then
-    if [ "$USE_SCREEN" = true ]; then
-        CRON_JOB="@reboot cd $WORKDIR/hugin-node && screen -dmS hugin-node npm run start"
-    else
-        CRON_JOB="@reboot cd $WORKDIR/hugin-node && npm run start"
+    if [ "$AUTOSTART" = "y" ] || [ "$AUTOSTART" = "Y" ]; then
+        if [ "$USE_SCREEN" = true ]; then
+            CRON_JOB="@reboot cd $WORKDIR/hugin-node && screen -dmS hugin-node npm run start"
+        else
+            CRON_JOB="@reboot cd $WORKDIR/hugin-node && npm run start"
+        fi
+        (crontab -l 2>/dev/null | grep -v 'hugin-node'; true) | { cat; echo "$CRON_JOB"; } | crontab -
+        success "Autostart added to crontab."
     fi
-    (crontab -l 2>/dev/null | grep -v 'hugin-node'; true) | { cat; echo "$CRON_JOB"; } | crontab -
-    success "Autostart added to crontab."
+else
+    info "Skipping autostart setup for Windows (crontab not supported)."
 fi
+
 
 # === Start the node ===
 if [ "$USE_SCREEN" = true ]; then
