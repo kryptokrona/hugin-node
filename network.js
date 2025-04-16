@@ -143,13 +143,15 @@ signal(message) {
 
 
 ban(info, conn) {
-  info.ban(true)
   conn.end()
   conn.destroy()
+  if (!info) return
+  info.ban(true)
 }
 
 timeout(info, conn) {
   this.ban(info, conn)
+  if (!info) return
   setTimeout(() => info.ban(false), 60000)
 }
 
