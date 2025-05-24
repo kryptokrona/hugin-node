@@ -52,7 +52,6 @@ async import() {
     await this.wallet.start()
     setInterval( async () => save('password', 'nodewallet', this.wallet), 350000);
     this.wallet.on('incomingtx', async (transaction) => {
-      console.log("TX", transaction)
       this.txs.push(transaction)
     });
     await this.loadtxs()
