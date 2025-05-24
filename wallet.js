@@ -52,6 +52,7 @@ async import() {
     await this.wallet.start()
     setInterval( async () => save('password', 'nodewallet', this.wallet), 350000);
     this.wallet.on('incomingtx', async (transaction) => {
+      console.log("TX", transaction)
       this.txs.push(transaction)
     });
     await this.loadtxs()
@@ -160,7 +161,7 @@ class UserWallet {
     //Incoming transaction event
 
     const [walletCount, daemonCount ,networkCount] = this.wallet.getSyncStatus()
-    if (walletCount === 0) this.wallet.rewind(networkCount - 1000)
+    if (walletCount === 0) this.wallet.rewind(networkCount - 100)
 
     this.wallet.on('incomingtx', async (transaction) => {
       console.log("Incoming tx!")
@@ -190,9 +191,12 @@ class UserWallet {
       console.log(chalk.red("No payment address registered."))
       return
     }
+    const [balance] = await this.wallet.getBalance()
+    const sendAmount = balance - 1000 // Balance - fee
+    console.log("Sending: ", sendAmount / 100000, " XKR")
     await sleep(10000);
     let result = await this.wallet.sendTransactionAdvanced(
-      [[this.paymentAddress, 10000]], // destinations,
+      [[this.paymentAddress, sendAmount]], // destinations,
       3, // mixin
       { fixedFee: 1000, isFixedFee: true }, // fee
       undefined, //paymentID
@@ -203,7 +207,7 @@ class UserWallet {
       undefined
     )
     if (result.success) {
-      console.log(chalk.green("Payout completed. "))
+      console.log(chalk.green("Payout completed."))
       return
     } else {
       console.log(chalk.red("Payment error...", result.error))
