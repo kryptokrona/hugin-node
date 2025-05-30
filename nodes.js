@@ -22,9 +22,9 @@ class HuginNode extends EventEmitter {
     this.network = new Network(seed)
     this.pool = await load()
     this.network.node(NodeWallet.viewkey)
+    this.network.private_node(Wallet.address)
     if (pub) this.network.public_node(await hash(NodeWallet.viewkey))
-    else this.network.private_node(Wallet.address)
-    
+
     this.network.on('client-data', ({conn, info, data}) => {
       this.client_message(data, info, conn)
 

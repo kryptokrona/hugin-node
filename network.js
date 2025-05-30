@@ -61,7 +61,7 @@ async private_node(key) {
   console.log(chalk.green("Private node started ✅"))
   console.log("")
   console.log(chalk.cyan("...................."))
-  console.log('NODE PRIVATE ADDRESS:');
+  console.log('NODE ADDRESS:');
   console.log(chalk.cyan("...................."))
   console.log("")
   console.log(chalk.white(Wallet.address + this.keys.publicKey.toString('hex')))
@@ -76,12 +76,6 @@ async public_node(key) {
   console.log(chalk.cyan("...................."))
   console.log(chalk.green("Public node started ✅"))
   console.log(chalk.cyan("...................."))
-  console.log('NODE PUBLIC ADDRESS:');
-  console.log(chalk.cyan("...................."))
-  console.log("")
-  console.log(chalk.white(Wallet.address + this.keys.publicKey.toString('hex')))
-  console.log("")
-  console.log("")
   return await this.swarm(key, false, true)
 }
 
@@ -101,7 +95,6 @@ node_connection(conn, info) {
     this.emit('node-data', {conn, info, data})
   })
   conn.on('error',() => {
-    console.log("Got error connection signal")
     conn.end()
     conn.destroy()
     this.nodes = this.nodes.filter(a => a.info !== info)
