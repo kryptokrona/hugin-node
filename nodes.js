@@ -5,13 +5,19 @@ const { Network } = require('./network')
 const { load, limit, save } = require('./storage')
 const {hash, chunk_array, sleep} = require('./utils')
 const chalk = require('chalk');
-const { ONE_DAY, DAY_LIMIT, SIGNATURE_ERROR, WRONG_MESSAGE_FORMAT, MESSAGE_VERIFIED, LIMIT_REACHED, NOT_VERIFIED } = require('./constants')
+const { 
+  ONE_DAY, DAY_LIMIT, 
+  SIGNATURE_ERROR, 
+  WRONG_MESSAGE_FORMAT, 
+  MESSAGE_VERIFIED, 
+  LIMIT_REACHED, 
+  NOT_VERIFIED } = require('./constants')
 
 class HuginNode extends EventEmitter {
   
   constructor() {
     super()
-    this.pool = []
+    this.pool = new Map()
     this.network = null
   }
 
@@ -22,21 +28,25 @@ class HuginNode extends EventEmitter {
     this.network = new Network(seed)
     this.pool = await load()
     this.network.node(NodeWallet.viewkey)
+
+    //Always start a private to gain access with Node address.
     this.network.private_node(Wallet.address)
+    //Public nodes are automatically found with fastest connection.
     if (pub) this.network.public_node(await hash(NodeWallet.viewkey))
 
+    
+    //Event listeners
     this.network.on('client-data', ({conn, info, data}) => {
       this.client_message(data, info, conn)
+     }) 
 
-  }) 
-
-  this.network.on('node-data', ({conn, info, data}) => { 
+    this.network.on('node-data', ({conn, info, data}) => { 
       this.node_message(data)
-  })
+    })
 
-      console.log(chalk.white("......................................."))
-      console.log(chalk.yellow("........Waiting for connections........"))
-      console.log(chalk.white("......................................."))
+    console.log(chalk.white("......................................."))
+    console.log(chalk.yellow("........Waiting for connections........"))
+    console.log(chalk.white("......................................."))
 
     process.on('SIGTERM', async () => {
       console.log(chalk.red("Closing node..."))
@@ -56,11 +66,11 @@ class HuginNode extends EventEmitter {
   }
 
   async save_pool() {
-    for (const message of this.pool) {
-      await save(message)
+    for (const [, message] of this.pool) {
+      await save(message);
     }
-    
-    console.log(chalk.green("Saved messages from pool."))
+
+    console.log(chalk.green("Saved messages from pool."));
   }
 
   async node_message(data, info, conn) {
@@ -85,9 +95,9 @@ class HuginNode extends EventEmitter {
       }
 
       if (response.length > 500) {
-        const parts = chunk_array(pool, 500)
-        for (const response of parts) {
-          this.send(conn,{response, id: data.id, chunks: true})
+        const parts = chunk_array(response, 500)
+        for (const res of parts) {
+          this.send(conn,{response: res, id: data.id, chunks: true})
           await sleep(20)
         }
         this.send(conn,{id: data.id, done: true})
@@ -99,29 +109,45 @@ class HuginNode extends EventEmitter {
 
     if ('type' in data) {
       if (data.type === 'post') {
-        if (await this.on_message(data, conn)) return
+        if (!await this.on_message(data, conn)) return
+        //If post is successful
+        //Forward push notification
+        if ('push' in data) {
+          //Send to push node
+          const p = {
+            payload: data.message,
+            push: data.push
+          }
+          this.network.notify(p)
+        }
       } else {
       console.log(chalk.red("Invalid post request"))
       this.network.ban(info, conn)
       return
       }
      }
-    }
+  }
 
  async on_message(data, conn, info) {
     const post = await this.post(data.message)
     if (post.success) {
-      this.send(conn,{success: true, id: data.message.id})
+      this.send(conn, {
+        success: true, 
+        id: data.message.id
+      })
       return true
     } else if (!post.success) {
-      this.send(conn,{reason: post.reason, success: false, id: data.message.id})
+      this.send(conn, { 
+          reason: post.reason, 
+          success: false, 
+          id: data.message.id
+        })
       //Temp ban user for one minute.
       await sleep(500)
       this.network.timeout(info, conn)
       return false
     }
   }
-
 
   gossip(message) {
       this.network.signal(message)
@@ -137,62 +163,68 @@ class HuginNode extends EventEmitter {
 
   //From a node
   async add(message) {
+    //Check early if we already have the message before we try to verify it.
+    if (typeof message.hash !== 'string') return WRONG_MESSAGE_FORMAT
+    if (this.pool.has(message.hash)) return MESSAGE_VERIFIED
+    
     //Ensure that we set the recieved timestamp as now.
     message.timestamp = Date.now()
+
+    //Verify and add message to pool.
     const verify = await this.verify(message)
     if (!verify.success) return verify
-    if (this.pool.some(a => a.hash == message.hash)) return {success: true}
-    this.pool.push(message)
-    console.log(chalk.yellow("Pool update. Number of messages:", this.pool.length))
+    this.pool.set(message.hash, message);
+    console.log(chalk.yellow("Pool update. Number of messages:", this.pool.size))
     return verify
   }
 
   // Got a request from client
   onrequest(req) {
-    if (!this.isrequest(req)) return false
-    if (req.type === "all") {
-      return this.pool
-    } else if (req.type === 'some') {
-      return this.pool.filter(msg => msg.timestamp > req.timestamp - 500)
-      .sort((a, b) => a.timestamp - b.timestamp);
+    if (!this.isrequest(req)) return false;
+
+    if (req.type === "some") {
+      return Array.from(this.pool.values())
+        .filter(msg => msg.timestamp > req.timestamp)
+        .sort((a, b) => a.timestamp - b.timestamp)
     }
   }
 
-    // Verify that the message is allowed to be sent to the network.
-    async verify(message) {
-      if (!this.check(message)) {
-        return WRONG_MESSAGE_FORMAT
-      }
-      if (!await NodeWallet.verify(message.pub)) {
-        return NOT_VERIFIED
-      }
-      if (!await Wallet.verify(message.cipher + message.hash, message.pub, message.signature)) {
-       return SIGNATURE_ERROR
-      }
-      if (this.limit(message.pub)) {
-        return LIMIT_REACHED
-      }
-      return MESSAGE_VERIFIED
+  // Verify that the message is allowed to be sent to the network.
+  async verify(message) {
+    if (!this.check(message)) {
+      return WRONG_MESSAGE_FORMAT
     }
+    if (!await NodeWallet.verify(message.pub)) {
+      return NOT_VERIFIED
+    }
+    if (!await Wallet.verify(message.cipher + message.hash, message.pub, message.signature)) {
+      return SIGNATURE_ERROR
+    }
+    if (this.limit(message.pub)) {
+      return LIMIT_REACHED
+    }
+    return MESSAGE_VERIFIED
+  }
 
-    send(conn, data) {
-      conn.write(JSON.stringify(data))
-    }
+  send(conn, data) {
+    conn.write(JSON.stringify(data))
+  }
 
   check(message) {
-      if (typeof message.cipher !== 'string') return false
-      if (typeof message.hash !== 'string') return false
-      if (typeof message.pub !== 'string') return false
-      if (typeof message.timestamp !== 'number') return false
-      if (typeof message.signature !== 'string') return false
+    if (typeof message.cipher !== 'string') return false
+    if (typeof message.hash !== 'string') return false
+    if (typeof message.pub !== 'string') return false
+    if (typeof message.timestamp !== 'number') return false
+    if (typeof message.signature !== 'string') return false
 
-      if (message.cipher.length > 3048) return false
-      if (message.hash.length > 64) return false
-      if (message.pub.length !== 64) return false
-      if (message.timestamp.length > 30) return false
-      if (message.signature.length !== 128) return false
+    if (message.cipher.length > 4096) return false
+    if (message.hash.length > 64) return false
+    if (message.pub.length !== 64) return false
+    if (message.timestamp.length > 30) return false
+    if (message.signature.length !== 128) return false
+    if (message.timestamp < 0) return false
 
-      return true
+    return true
   }
 
   isrequest(req) {
@@ -206,17 +238,26 @@ class HuginNode extends EventEmitter {
   }
 
   cleaner() {
-    const now = Date.now()
-    const clean = this.pool.filter(m => {
-      return m.timestamp && m.timestamp > (now - ONE_DAY);
-    });
-    this.pool = clean
+    const now = Date.now();
+    for (const [hash, message] of this.pool) {
+      if (!message.timestamp || message.timestamp <= now - ONE_DAY) {
+        this.pool.delete(hash)
+      }
+    }
   }
 
   limit(pub) {
-    const number = this.pool.filter(m => m.pub === pub);
-    return number.length > DAY_LIMIT
+    let count = 0;
+    for (const [, message] of this.pool) {
+      if (message.pub === pub) {
+        count++
+        if (count > DAY_LIMIT) return true
+      }
+    }
+
+    return false;
   }
+
 
 }
 

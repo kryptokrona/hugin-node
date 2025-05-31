@@ -11,7 +11,6 @@ async function start_check() {
   console.log(chalk.green("You are running Hugin Node version", NODE_VERSION))
   if (!fs.existsSync('./db')) {
       fs.mkdirSync('./db');
-
       return init()
   } else {
       return login()
@@ -122,13 +121,11 @@ async function commands(node) {
         BACKUP_WALLET()
         break;
 
-        case 'payout':
-          console.log(chalk.blue.bold('Creating manual payout transaction...'))
-          Wallet.payout()
+      case 'payout':
+        console.log(chalk.blue.bold('Creating manual payout transaction...'))
+        Wallet.payout()
         break;
 
-
-  
       default:
         console.log(`Unknown command: ${command}`)
     }
@@ -273,7 +270,7 @@ const SHOW_STATS = async (node) => {
    console.log(chalk.blue.bold(':::::::::STATS:::::::::'))
    console.log(`${chalk.green('Active clients:')} ${chalk.yellow(node.network.clients.length)}`)
    console.log(`${chalk.green('Nodes:')} ${chalk.yellow(node.network.nodes.length)}`)
-   console.log(`${chalk.green('Messages in Pool:')} ${chalk.yellow(node.pool.length)}`)
+   console.log(`${chalk.green('Messages in Pool:')} ${chalk.yellow(node.pool.size)}`)
    console.log(`${chalk.green('Node balance:')} ${chalk.yellow(parseInt(await Wallet.wallet.getBalance()) / 100000)} XKR`)
    console.log(chalk.blue.bold(':::::::::::::::::::::::'))
    console.log(chalk.blue.bold(':::::::::::::::::::::::'))

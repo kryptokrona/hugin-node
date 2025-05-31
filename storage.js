@@ -67,7 +67,12 @@ async function load() {
   const queryStream = db.find('@messages/messages', {});
   const messages = await queryStream.toArray();
   console.log('Loaded messages:', messages.length);
-  return messages;
+  const pool = new Map();
+  for (const message of messages) {
+    pool.set(message.hash, message);
+  }
+
+  return pool
 }
 
 

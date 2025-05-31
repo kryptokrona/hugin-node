@@ -134,6 +134,12 @@ signal(message) {
   }
 }
 
+notify(message) {
+  for (const n of this.nodes) {
+    n.conn.write(JSON.stringify({push: true, message}))
+  }
+}
+
 
 ban(info, conn) {
   conn.end()
