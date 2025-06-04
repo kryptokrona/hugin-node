@@ -81,7 +81,9 @@ class HuginNode extends EventEmitter {
         console.log(chalk.red("Invalid node signal message, ban node"))
         this.network.ban(info, conn)
       }
+      return
     }
+
   } 
 
   async client_message(data, info, conn) {
@@ -112,13 +114,9 @@ class HuginNode extends EventEmitter {
         if (!await this.on_message(data, conn)) return
         //If post is successful
         //Forward push notification
-        if ('push' in data) {
-          //Send to push node
-          const p = {
-            payload: data.message,
-            push: data.push
-          }
-          this.network.notify(p)
+        if ('push' in data.message) {
+          this.network.notify(data)
+          return
         }
       } else {
       console.log(chalk.red("Invalid post request"))
@@ -126,7 +124,15 @@ class HuginNode extends EventEmitter {
       return
       }
      }
+
+     //Forward encrypted register requests.
+     if ('register' in data) {
+       this.network.notify(data)
+     } 
+
   }
+
+
 
  async on_message(data, conn, info) {
     const post = await this.post(data.message)
