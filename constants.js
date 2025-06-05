@@ -1,7 +1,7 @@
 
 // LIMITS
 
-const DAY_LIMIT = 50
+const DAY_LIMIT = 100
 const ONE_DAY = 24 * 60 * 60 * 1000;
 
 // ERRORS
