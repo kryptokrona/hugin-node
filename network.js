@@ -140,8 +140,16 @@ notify(message) {
   }
 }
 
+//Notify clients of new message.
+onmessage(message) {
+  for (const c of this.clients) {
+    c.conn.write(JSON.stringify({type: 'new-message', message}))
+  }
+}
+
 
 ban(info, conn) {
+  if (!conn) return
   conn.end()
   conn.destroy()
   if (!info) return

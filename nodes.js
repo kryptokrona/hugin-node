@@ -156,6 +156,7 @@ class HuginNode extends EventEmitter {
   }
 
   gossip(message) {
+      this.network.onmessage(message)
       this.network.signal(message)
   }
 
