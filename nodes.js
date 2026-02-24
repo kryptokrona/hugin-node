@@ -280,14 +280,20 @@ class HuginNode extends EventEmitter {
 
     if ('push' in data) {
       // only do cheap checks here (push server will do full verification).
-      const pre = this.cheap_pow(data.message)
+      const message = data && data.message
+      if (!message || typeof message !== 'object') return
+      // Some forwarded node payloads (e.g. register envelopes) are not PoW messages.
+      // Ignore them here instead of banning the peer.
+      if (!this.check(message)) return
+
+      const pre = this.cheap_pow(message)
       if (!pre.success) {
         console.log("Failed to add message:", pre.reason)
         console.log(chalk.red("Invalid node push message, ban node"))
         this.network.ban(info, conn)
         return
       }
-      const add = await this.add(data.message, true)
+      const add = await this.add(message, true)
       if (!add.success) {
         console.log("Failed to add message:", add.reason)
         console.log(chalk.red("Invalid node push message, ban node"))
