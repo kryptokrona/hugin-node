@@ -54,6 +54,7 @@ class HuginNode extends EventEmitter {
     this.previousPrevId = null
     this.twoBackPrevId = null
     this.poolIndex = 0
+    this.lastPoolSwitchAt = 0
     this.payoutAddress = options.payoutAddress || ''
     this.networkAddress = 'xkr96c0f8a36e951b399681d447922f6c54c28c6ef3cad1c65d3568008151337';
     this.clientPostLastAcceptedAt = new WeakMap()
@@ -211,7 +212,7 @@ class HuginNode extends EventEmitter {
     })
 
     this.poolConnector.on('loginFailed', () => {
-      this.next_pool()
+      this.maybe_switch_pool('login_failed')
     })
 
     // Prevent hard-crash on transient socket errors (e.g. ECONNRESET / lost internet)
@@ -219,13 +220,35 @@ class HuginNode extends EventEmitter {
       const code = err && err.code ? String(err.code) : 'UNKNOWN'
       const msg = err && err.message ? String(err.message) : ''
       console.log(chalk.yellow(`Pool connection error: ${code}${msg ? ` (${msg})` : ''}`))
+      // Rotate pools on connection issues; throttle to avoid rapid loops.
+      const shouldSwitch = [
+        'ECONNRESET',
+        'ECONNREFUSED',
+        'ETIMEDOUT',
+        'EPIPE',
+        'ENOTFOUND',
+        'EHOSTUNREACH',
+        'ENETUNREACH'
+      ].includes(code)
+      if (shouldSwitch) {
+        this.maybe_switch_pool('pool_error', code)
+      }
     })
 
     this.poolConnector.on('disconnected', () => {
-      this.next_pool()
+      this.maybe_switch_pool('disconnected')
     })
 
     this.poolConnector.connect()
+  }
+
+  maybe_switch_pool(reason, code = null) {
+    const now = this.nowMs()
+    // 2s throttle (connect_pool already has a 2s delay)
+    if ((now - this.lastPoolSwitchAt) < 2000) return
+    this.lastPoolSwitchAt = now
+    logPow('pool_failover', { reason, code, nextIndex: (this.poolIndex + 1) % (POOLS.length || 1) })
+    this.next_pool()
   }
 
   next_pool() {

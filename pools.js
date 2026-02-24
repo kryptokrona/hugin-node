@@ -146,12 +146,26 @@ class PoolConnector extends EventEmitter {
   }
 
   send(method, params, callback) {
-    if (!this.socket || !this.socket.writable) return
+    if (!this.socket || !this.socket.writable) {
+      if (callback) {
+        process.nextTick(() => callback(new Error('socket_not_writable'), null))
+      }
+      return false
+    }
     const id = this.nextId++
     if (callback) {
       this.pending.set(id, callback)
     }
-    this.socket.write(createMessage(id, method, params))
+    try {
+      this.socket.write(createMessage(id, method, params))
+      return true
+    } catch (err) {
+      if (callback) {
+        this.pending.delete(id)
+        process.nextTick(() => callback(err, null))
+      }
+      return false
+    }
   }
 
   handleMessage(raw) {
@@ -186,23 +200,28 @@ class PoolConnector extends EventEmitter {
   }
 
   async verifyShare(job, nonce, result) {
-    if (!job || !job.blob || !nonce || !result) return false
-    if (!/^[0-9a-fA-F]{8}$/.test(nonce)) return false
+    try {
+      if (!job || !job.blob || !nonce || !result) return false
+      if (!/^[0-9a-fA-F]{8}$/.test(nonce)) return false
 
-    const { blobHex, offset } = insertNonce(job.blob, nonce)
-    logPow('nonce_offset', { jobId: job.job_id, offset })
-    const hashHex = await crypto.cn_turtle_lite_slow_hash_v2(blobHex)
+      const { blobHex, offset } = insertNonce(job.blob, nonce)
+      logPow('nonce_offset', { jobId: job.job_id, offset })
+      const hashHex = await crypto.cn_turtle_lite_slow_hash_v2(blobHex)
 
-    if (hashHex !== result) {
-      logPow('share_mismatch', { jobId: job.job_id, nonce })
+      if (hashHex !== result) {
+        logPow('share_mismatch', { jobId: job.job_id, nonce })
+        return false
+      }
+
+      const ok = meetsTarget(hashHex, job.target)
+      if (!ok) {
+        logPow('share_low_diff', { jobId: job.job_id, nonce })
+      }
+      return ok
+    } catch (err) {
+      logPow('verify_share_error', { code: err && err.code, message: err && err.message })
       return false
     }
-
-    const ok = meetsTarget(hashHex, job.target)
-    if (!ok) {
-      logPow('share_low_diff', { jobId: job.job_id, nonce })
-    }
-    return ok
   }
 
   async submitShare(share) {
@@ -215,7 +234,7 @@ class PoolConnector extends EventEmitter {
     }
 
     return await new Promise((resolve) => {
-      this.send(
+      const sent = this.send(
         'submit',
         {
           id: this.session.id,
@@ -234,6 +253,9 @@ class PoolConnector extends EventEmitter {
           return resolve({ ok: true, result })
         }
       )
+      if (!sent) {
+        return resolve({ ok: false, reason: 'socket_not_writable' })
+      }
     })
   }
 
