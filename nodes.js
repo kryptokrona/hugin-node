@@ -433,6 +433,7 @@ class HuginNode extends EventEmitter {
 
     const tPool = process.hrtime.bigint()
     let accepted = false
+    const rejects = []
     for (const share of shares.slice(0, MAX_SHARES_PER_MESSAGE)) {
       const poolRes = await this.poolConnector.submitShare({
         job_id: share.job_id,
@@ -443,17 +444,25 @@ class HuginNode extends EventEmitter {
         accepted = true
         break
       }
+      rejects.push({
+        reason: poolRes && poolRes.reason ? poolRes.reason : 'unknown',
+        error: poolRes && poolRes.error
+          ? (poolRes.error.message || poolRes.error.code || String(poolRes.error))
+          : null
+      })
     }
     if (POW_DEBUG) {
-      logPow('pool_submit_timing', { ms: this.hrtimeMs(tPool), ok: accepted })
+      logPow('pool_submit_timing', { ms: this.hrtimeMs(tPool), ok: accepted, rejects })
     }
     if (!accepted) {
-      const strikes = (this.clientInvalidShareStrikes.get(conn) || 0) + 1
-      this.clientInvalidShareStrikes.set(conn, strikes)
-      logPow('client_post', { status: 'reject', reason: 'pool_reject', client_id, strikes, id: message && message.id, jobId: message && message.pow && message.pow.job && message.pow.job.job_id })
-      this.send(conn, { reason: 'pool_reject', success: false, id: message && message.id })
-      if (strikes >= 2) {
-        this.network.ban(info, conn)
+      // Pool reject can happen on stale jobs (race between compute and submit).
+      // Don't insta-ban; instead, push latest job so client can retry quickly.
+      logPow('client_post', { status: 'reject', reason: 'pool_reject', client_id, id: message && message.id, jobId: message && message.pow && message.pow.job && message.pow.job.job_id, rejects })
+      this.send(conn, { reason: 'pool_reject', success: false, id: message && message.id, rejects })
+      if (this.poolJob) {
+        try {
+          this.send(conn, { type: 'job', job: this.poolJob })
+        } catch (_) {}
       }
       return
     }
