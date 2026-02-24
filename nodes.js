@@ -52,6 +52,7 @@ class HuginNode extends EventEmitter {
     this.jobSubscribers = new Set()
     this.currentPrevId = null
     this.previousPrevId = null
+    this.twoBackPrevId = null
     this.poolIndex = 0
     this.payoutAddress = options.payoutAddress || ''
     this.networkAddress = 'xkr96c0f8a36e951b399681d447922f6c54c28c6ef3cad1c65d3568008151337';
@@ -202,6 +203,7 @@ class HuginNode extends EventEmitter {
         pending: this.pendingJobRequests.size
       })
       if (prevId) {
+        this.twoBackPrevId = this.previousPrevId
         this.previousPrevId = this.currentPrevId
         this.currentPrevId = prevId
       }
@@ -268,13 +270,19 @@ class HuginNode extends EventEmitter {
   async node_message(data, info, conn) {
     // Node-to-node propagation (gossip)
     if ('signal' in data) {
-      // Node-to-node gossip verification (random sampled slow-check)
-      const add = await this.add(data.message)
-      if (!add.success) {
-        console.log("Failed to add message:", add.reason)
+      const message = data && data.message
+      if (!message || typeof message !== 'object') return
+      // We can't reliably verify pool shares from other nodes (they may use a different pool/template).
+      // Do a cheap gossip validation instead and store without slow-check.
+      if (!this.check(message)) return
+      if (!(await this.pow_check_gossip(message))) {
+        console.log("Failed to add message:", POW_INVALID.reason)
         console.log(chalk.red("Invalid node signal message, ban node"))
         this.network.ban(info, conn)
+        return
       }
+      const add = await this.add(message, true)
+      if (!add.success) return
       return
     }
 
@@ -282,7 +290,7 @@ class HuginNode extends EventEmitter {
       // only do cheap checks here (push server will do full verification).
       const message = data && data.message
       if (!message || typeof message !== 'object') return
-      // Some forwarded node payloads (e.g. register envelopes) are not PoW messages.
+      // Some forwarded node payloads (e.g. register) are not PoW messages.
       // Ignore them here instead of banning the peer.
       if (!this.check(message)) return
 
@@ -663,7 +671,7 @@ class HuginNode extends EventEmitter {
       logPow('pow_check_fast', { status: 'reject', reason: 'no_prev_id', jobId: job.job_id })
       return false
     }
-    if (prevId !== this.currentPrevId && prevId !== this.previousPrevId) {
+    if (prevId !== this.currentPrevId && prevId !== this.previousPrevId && prevId !== this.twoBackPrevId) {
       logPow('pow_check_fast', { status: 'reject', reason: 'prev_id_mismatch', jobId: job.job_id })
       return false
     }
@@ -697,6 +705,36 @@ class HuginNode extends EventEmitter {
     return false
   }
 
+  // Node-to-node gossip check: validate message/share shapes + nonce-tag binding.
+  // Does NOT check prev_id freshness against our pool template (nodes can use different pools/templates).
+  async pow_check_gossip(message) {
+    if (!message || !message.pow) return false
+    if (!this.poolConnector) return false
+    const job = message.pow.job
+    const shares = message.pow.shares || []
+    if (!job || !job.job_id || !job.blob || !job.target) return false
+    if (!Array.isArray(shares) || shares.length === 0) return false
+
+    const prevId = extractPrevIdFromBlob(job.blob)
+    if (!prevId) return false
+
+    const tagValue = nonceTagFromMessageHash(message.hash, NONCE_TAG_BITS)
+    const cappedShares = shares.slice(0, MAX_SHARES_PER_MESSAGE)
+    const candidates = []
+    for (const share of cappedShares) {
+      if (!share || share.job_id !== job.job_id) continue
+      if (typeof share.nonce !== 'string' || share.nonce.length !== 8 || !isHexString(share.nonce)) continue
+      if (typeof share.result !== 'string' || share.result.length !== 64 || !isHexString(share.result)) continue
+      if (!nonceMatchesTag(share.nonce, tagValue, NONCE_TAG_BITS)) continue
+      candidates.push(share)
+    }
+    if (!candidates.length) return false
+
+    // Do one slow verification (random-sampled) to ensure the share is actually valid PoW for this job.
+    const share = candidates[Math.floor(Math.random() * candidates.length)]
+    return await this.poolConnector.verifyShare(job, share.nonce, share.result)
+  }
+
   pow_target(messageHash) {
     return 1
   }
@@ -708,13 +746,13 @@ class HuginNode extends EventEmitter {
     if (!job || !job.job_id || !job.blob || !job.target) return false
     if (!Array.isArray(shares) || shares.length === 0) return false
 
-    // Freshness check: accept only current/previous block template (±1).
+    // Freshness check: accept only current/previous block templates (last 3 prev_ids).
     const prevId = extractPrevIdFromBlob(job.blob)
     if (!prevId || !this.currentPrevId) {
       logPow('pow_check_stale', { reason: 'no_prev_id', jobId: job.job_id })
       return false
     }
-    if (prevId !== this.currentPrevId && prevId !== this.previousPrevId) {
+    if (prevId !== this.currentPrevId && prevId !== this.previousPrevId && prevId !== this.twoBackPrevId) {
       logPow('pow_check_stale', { reason: 'prev_id_mismatch', jobId: job.job_id })
       return false
     }
