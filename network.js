@@ -2,8 +2,8 @@ const EventEmitter = require('bare-events')
 const Hyperswarm = require('hyperswarm-hugin')
 const { create_keys_from_seed, get_new_peer_keys, parse } = require('./utils')
 const chalk = require('chalk');
-const { Wallet } = require('./wallet');
-const { NODE_VERSION } = require('./constants');
+const { NodeId } = require('./id');
+const { NODE_VERSION, MAX_NODE_INBOUND_BYTES, MAX_CLIENT_INBOUND_BYTES } = require('./constants');
 
 class Network extends EventEmitter {
   constructor(seed) {
@@ -48,10 +48,10 @@ async swarm(key, priv = false, pub = false) {
   await discovery.flushed()
 }
 
-// Node is connected to other nodes. 
+// Node is connected to other nodes.
 
 async node (key) {
-  console.log(chalk.green("Network started ✅"))
+  console.log(chalk.green("Network started ✅", key))
   return await this.swarm(key, false)
 
 }
@@ -64,7 +64,7 @@ async private_node(key) {
   console.log('NODE ADDRESS:');
   console.log(chalk.cyan("...................."))
   console.log("")
-  console.log(chalk.white(Wallet.address + this.keys.publicKey.toString('hex')))
+  console.log(chalk.white(NodeId.address + this.keys.publicKey.toString('hex')))
   console.log("")
   return await this.swarm(key, true, false)
 }
@@ -86,6 +86,10 @@ node_connection(conn, info) {
   // Send node version to other nodes
   conn.write(JSON.stringify({version: NODE_VERSION}))
   conn.on('data', (d) => {
+    if (d.length > MAX_NODE_INBOUND_BYTES) {
+      this.ban(info, conn)
+      return
+    }
     const m = d.toString()
     const data = parse(m)
     if (!data) {
@@ -99,16 +103,19 @@ node_connection(conn, info) {
     conn.destroy()
     this.nodes = this.nodes.filter(a => a.info !== info)
   })
+  conn.on('close',() => {
+    this.nodes = this.nodes.filter(a => a.info !== info)
+  })
 }
 
 async client_connection(conn, info) {
   console.log(chalk.green("Incoming client connection"))
   this.clients.push({conn, info})
   //Send our node wallet address to client.
-  conn.write(JSON.stringify({address: Wallet.address, version: NODE_VERSION}))
+  conn.write(JSON.stringify({address: NodeId.address, version: NODE_VERSION}))
 
   conn.on('data', (d) => {
-    if (d.length > 5000) {
+    if (d.length > MAX_CLIENT_INBOUND_BYTES) {
         this.ban(info, conn)
         return
     }
@@ -125,25 +132,41 @@ async client_connection(conn, info) {
     conn.destroy()
     this.clients = this.clients.filter(a => a.info !== info)
   })
+  conn.on('close',() => {
+    this.clients = this.clients.filter(a => a.info !== info)
+  })
 }
 
 //Notify other nodes of incoming client message
 signal(message) {
   for (const n of this.nodes) {
-    n.conn.write(JSON.stringify({signal: true, message}))
+    try {
+      n.conn.write(JSON.stringify({signal: true, message}))
+    } catch (e) {
+      // drop dead connection
+      this.nodes = this.nodes.filter(a => a.conn !== n.conn)
+    }
   }
 }
 
 notify(message) {
   for (const n of this.nodes) {
-    n.conn.write(JSON.stringify({push: true, message}))
+    try {
+      n.conn.write(JSON.stringify({push: true, message}))
+    } catch (e) {
+      this.nodes = this.nodes.filter(a => a.conn !== n.conn)
+    }
   }
 }
 
 //Notify clients of new message.
 onmessage(message) {
   for (const c of this.clients) {
-    c.conn.write(JSON.stringify({type: 'new-message', message}))
+    try {
+      c.conn.write(JSON.stringify({type: 'new-message', message}))
+    } catch (e) {
+      this.clients = this.clients.filter(a => a.conn !== c.conn)
+    }
   }
 }
 
