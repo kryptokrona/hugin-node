@@ -3,11 +3,24 @@ const fs = require('fs');
 
 const CONFIG_PATH = './config.json';
 const ADDRESS_LENGTH = 99;
+const DEFAULT_CONFIG = {
+  payoutAddress: '',
+  private: false,
+  nodeId: '',
+};
+
+function isNonEmptyString(value) {
+  return typeof value === 'string' && value.trim().length > 0;
+}
 
 function readConfig() {
   try {
+    if (!fs.existsSync(CONFIG_PATH)) {
+      writeConfig({ ...DEFAULT_CONFIG });
+      return { ...DEFAULT_CONFIG };
+    }
     const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
-    return JSON.parse(raw);
+    return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
   } catch (e) {
     return {};
   }
@@ -30,28 +43,36 @@ class NodeIdentity {
 
   async init() {
     const config = readConfig();
+    let changed = false;
 
-    if (config.nodeId) {
-      const raw = String(config.nodeId);
+    if (isNonEmptyString(config.nodeId)) {
+      const raw = String(config.nodeId).trim();
       if (raw.length >= ADDRESS_LENGTH) {
         this.address = raw.slice(0, ADDRESS_LENGTH);
         this.viewkey = raw.slice(ADDRESS_LENGTH);
-        return true;
       }
     }
 
-    const spend = await KeyPair.from();
-    const view = await KeyPair.from();
-    const addr = await Address.fromPublicKeys(spend.publicKey, view.publicKey);
-    const address = await addr.address();
+    if (!this.address || !this.viewkey) {
+      const spend = await KeyPair.from();
+      const view = await KeyPair.from();
+      const addr = await Address.fromPublicKeys(spend.publicKey, view.publicKey);
+      const address = await addr.address();
 
-    this.address = address;
-    this.viewkey = view.privateKey;
+      this.address = address;
+      this.viewkey = view.privateKey;
+      config.nodeId = `${this.address}${this.viewkey}`;
+      changed = true;
+    }
 
-    writeConfig({
-      ...config,
-      nodeId: `${this.address}${this.viewkey}`,
-    });
+    if (!isNonEmptyString(config.payoutAddress)) {
+      config.payoutAddress = this.address;
+      changed = true;
+    }
+
+    if (changed) {
+      writeConfig(config);
+    }
 
     return true;
   }

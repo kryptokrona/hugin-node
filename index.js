@@ -7,12 +7,27 @@ const { HuginNode } = require('./nodes');
 const { sleep } = require('./utils');
 const { NODE_VERSION } = require('./constants');
 
+const CONFIG_PATH = './config.json'
+
+const DEFAULT_CONFIG = {
+  payoutAddress: '',
+  private: false,
+  nodeId: ''
+}
+
+function ensureConfigExists() {
+  if (fs.existsSync(CONFIG_PATH)) return false
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify(DEFAULT_CONFIG, null, 2))
+  return true
+}
+
 function loadConfig() {
   try {
+    if (!fs.existsSync(CONFIG_PATH)) return { ...DEFAULT_CONFIG }
     const raw = fs.readFileSync('./config.json', 'utf8');
-    return JSON.parse(raw);
+    return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
   } catch (e) {
-    return {};
+    return { ...DEFAULT_CONFIG };
   }
 }
 
@@ -20,6 +35,12 @@ async function start_check() {
   console.log(chalk.green("You are running Hugin Node version", NODE_VERSION))
   if (!fs.existsSync('./db')) {
       fs.mkdirSync('./db');
+  }
+  const created = ensureConfigExists()
+  if (created) {
+    console.log(chalk.yellow('Created `config.json`.'))
+    console.log(chalk.yellow('Set `payoutAddress` in `config.json`, then restart the node.'))
+    return process.exit(0)
   }
   return start_node();
 }
