@@ -72,6 +72,7 @@ class PoolConnector extends EventEmitter {
     this.session = { id: null, job: null }
     this.validJobs = []
     this.cn = crypto.cn_turtle_lite_slow_hash_v2
+    this.reauthInFlight = false
   }
 
   connect() {
@@ -103,9 +104,9 @@ class PoolConnector extends EventEmitter {
     socket.on('error', (err) => {
       logPow('pool_error', { code: err && err.code, message: err && err.message })
       this.emit('poolError', err)
-      try {
-        this.emit('error', err)
-      } catch (_) {}
+      // Do NOT emit the special 'error' event here.
+      // Emitting 'error' without a listener can hard-crash the process; consumers
+      // should use 'poolError' to decide whether to reconnect / failover / exit.
     })
 
     socket.on('close', () => {
@@ -123,14 +124,21 @@ class PoolConnector extends EventEmitter {
       this.socket.destroy()
       this.socket = null
     }
+    this.buffer = ''
+    this.pending.clear()
+    this.session.id = null
+    this.session.job = null
   }
 
   login() {
+    if (this.reauthInFlight) return
+    this.reauthInFlight = true
     const login = this.options.login
     const pass = this.options.pass || 'x'
     const agent = this.options.agent || 'hugin-node'
 
     this.send('login', { login, pass, agent }, (error, result) => {
+      this.reauthInFlight = false
       if (error || !result || !result.id) {
         logPow('pool_login_failed', { error: error && error.message })
         this.emit('loginFailed', error || new Error('login failed'))
@@ -244,6 +252,17 @@ class PoolConnector extends EventEmitter {
         },
         (error, result) => {
           if (error) {
+            const errorText = String(
+              (error && (error.message || error.code)) || error
+            )
+            if (/unauthenticated/i.test(errorText)) {
+              // Pool lost our auth/session; clear and re-login.
+              this.session.id = null
+              this.emit('unauthenticated', { error })
+              if (this.socket && this.socket.writable) {
+                this.login()
+              }
+            }
             this.emit('shareRejected', { reason: 'pool', error, share })
             logPow('share_reject', { reason: 'pool', jobId: share.job_id })
             return resolve({ ok: false, reason: 'pool', error })

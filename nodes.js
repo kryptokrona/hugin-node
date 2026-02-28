@@ -55,6 +55,7 @@ class HuginNode extends EventEmitter {
     this.twoBackPrevId = null
     this.poolIndex = 0
     this.lastPoolSwitchAt = 0
+    this.poolReconnectTimer = null
     this.payoutAddress = options.payoutAddress || ''
     this.networkAddress = 'xkr96c0f8a36e951b399681d447922f6c54c28c6ef3cad1c65d3568008151337';
     this.clientPostLastAcceptedAt = new WeakMap()
@@ -175,7 +176,7 @@ class HuginNode extends EventEmitter {
       this.poolConnector = null
     }
     const login = this.payoutAddress
-    if (!login) {
+    if (!login.length && login.length !== 99) {
       console.log(chalk.red("No payout address set. Set it before starting..."))
       return
     }
@@ -192,8 +193,20 @@ class HuginNode extends EventEmitter {
       includeHeight: POOL_INCLUDE_HEIGHT,
       hashingUtil: POOL_HASHING_UTIL
     })
+    const poolConnector = this.poolConnector
 
-    this.poolConnector.on('job', (job) => {
+    poolConnector.on('connected', () => {
+      if (this.poolConnector !== poolConnector) return
+      this.reset_pool_reconnect()
+    })
+
+    poolConnector.on('login', () => {
+      if (this.poolConnector !== poolConnector) return
+      this.reset_pool_reconnect()
+    })
+
+    poolConnector.on('job', (job) => {
+      if (this.poolConnector !== poolConnector) return
       this.poolJob = job
       const prevId = job && job.blob ? extractPrevIdFromBlob(job.blob) : null
       logPow('job_received', {
@@ -211,35 +224,54 @@ class HuginNode extends EventEmitter {
       this.flush_jobs()
     })
 
-    this.poolConnector.on('loginFailed', () => {
+    poolConnector.on('loginFailed', () => {
+      if (this.poolConnector !== poolConnector) return
       this.maybe_switch_pool('login_failed')
     })
 
     // Prevent hard-crash on transient socket errors (e.g. ECONNRESET / lost internet)
-    this.poolConnector.on('poolError', (err) => {
+    poolConnector.on('poolError', (err) => {
+      if (this.poolConnector !== poolConnector) return
       const code = err && err.code ? String(err.code) : 'UNKNOWN'
       const msg = err && err.message ? String(err.message) : ''
       console.log(chalk.yellow(`Pool connection error: ${code}${msg ? ` (${msg})` : ''}`))
-      // Rotate pools on connection issues; throttle to avoid rapid loops.
-      const shouldSwitch = [
-        'ECONNRESET',
-        'ECONNREFUSED',
-        'ETIMEDOUT',
-        'EPIPE',
-        'ENOTFOUND',
-        'EHOSTUNREACH',
-        'ENETUNREACH'
-      ].includes(code)
-      if (shouldSwitch) {
+      const outageCodes = new Set(['ENETUNREACH', 'EHOSTUNREACH', 'ENOTFOUND'])
+      const switchCodes = new Set(['ECONNREFUSED'])
+
+      if (switchCodes.has(code)) {
         this.maybe_switch_pool('pool_error', code)
+        return
       }
+
+      const isOutage = outageCodes.has(code)
+      this.schedule_pool_reconnect(isOutage ? 'network_outage' : 'pool_error', code)
     })
 
-    this.poolConnector.on('disconnected', () => {
-      this.maybe_switch_pool('disconnected')
+    poolConnector.on('disconnected', () => {
+      if (this.poolConnector !== poolConnector) return
+      this.schedule_pool_reconnect('disconnected')
     })
 
-    this.poolConnector.connect()
+    poolConnector.connect()
+  }
+
+  reset_pool_reconnect() {
+    if (this.poolReconnectTimer) {
+      clearTimeout(this.poolReconnectTimer)
+      this.poolReconnectTimer = null
+    }
+  }
+
+  schedule_pool_reconnect(reason, code = null) {
+    if (this.poolReconnectTimer) return
+    const delayMs = 2000
+    logPow('pool_reconnect', { reason, code, delayMs })
+    this.poolReconnectTimer = setTimeout(() => {
+      this.poolReconnectTimer = null
+      if (!POOLS.length) return
+      const currentPool = POOLS[this.poolIndex]
+      if (currentPool) this.connect_pool(currentPool)
+    }, delayMs)
   }
 
   maybe_switch_pool(reason, code = null) {
@@ -295,8 +327,6 @@ class HuginNode extends EventEmitter {
     if ('signal' in data) {
       const message = data && data.message
       if (!message || typeof message !== 'object') return
-      // We can't reliably verify pool shares from other nodes (they may use a different pool/template).
-      // Do a cheap gossip validation instead and store without slow-check.
       if (!this.check(message)) return
       if (!(await this.pow_check_gossip(message))) {
         console.log("Failed to add message:", POW_INVALID.reason)
