@@ -28,7 +28,13 @@ const {
   MAX_MESSAGE_FUTURE_MS,
   MAX_SYNC_MESSAGES,
   MAX_JOB_BLOB_HEX_BYTES,
-  CLIENT_POST_COOLDOWN_MS } = require('./constants')
+  CLIENT_POST_COOLDOWN_MS,
+  CLIENT_JOB_REQUEST_MAX_PER_10S,
+  CLIENT_POW_TAG_MAX_PER_10S,
+  GLOBAL_JOB_REQUEST_MAX_PER_10S,
+  GLOBAL_POW_TAG_MAX_PER_10S,
+  REQUEST_RATE_WINDOW_MS,
+  CLIENT_REQUEST_SPAM_STRIKES } = require('./constants')
 
 const logPow = (...args) => {
   if (POW_DEBUG) {
@@ -38,6 +44,17 @@ const logPow = (...args) => {
 
 function isHexString(value) {
   return typeof value === 'string' && /^[0-9a-f]+$/i.test(value)
+}
+
+function nonceLowBits(nonceHex, bits) {
+  if (typeof nonceHex !== 'string' || nonceHex.length !== 8 || !isHexString(nonceHex)) return null
+  const b = typeof bits === 'number' ? bits : 0
+  if (b <= 0 || b > 16) return null
+  const bytes = Buffer.from(nonceHex, 'hex')
+  if (bytes.length !== 4) return null
+  const nonce = ((bytes[0]) | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24)) >>> 0
+  const mask = (1 << b) - 1
+  return nonce & mask
 }
 
 class HuginNode extends EventEmitter {
@@ -62,6 +79,11 @@ class HuginNode extends EventEmitter {
     this.clientInvalidShareStrikes = new WeakMap()
     this.clientConnIds = new WeakMap()
     this.nextClientConnId = 1
+    this.clientJobRequestWindows = new WeakMap()
+    this.clientPowTagRequestWindows = new WeakMap()
+    this.clientRequestSpamStrikes = new WeakMap()
+    this.globalJobRequestWindow = { start: 0, count: 0 }
+    this.globalPowTagRequestWindow = { start: 0, count: 0 }
   }
 
   client_id(conn) {
@@ -81,6 +103,62 @@ class HuginNode extends EventEmitter {
   hrtimeMs(startNs) {
     const diff = process.hrtime.bigint() - startNs
     return Number(diff) / 1e6
+  }
+
+  allow_client_window(map, conn, now, limit, windowMs) {
+    let state = map.get(conn)
+    if (!state || (now - state.start) >= windowMs) {
+      state = { start: now, count: 0 }
+    }
+    state.count += 1
+    map.set(conn, state)
+    return state.count <= limit
+  }
+
+  allow_global_window(state, now, limit, windowMs) {
+    if (!state.start || (now - state.start) >= windowMs) {
+      state.start = now
+      state.count = 0
+    }
+    state.count += 1
+    return state.count <= limit
+  }
+
+  rate_limit_request(kind, conn, info, id) {
+    const now = this.nowMs()
+    const isJob = kind === 'job_request'
+    const perClientLimit = isJob ? CLIENT_JOB_REQUEST_MAX_PER_10S : CLIENT_POW_TAG_MAX_PER_10S
+    const globalLimit = isJob ? GLOBAL_JOB_REQUEST_MAX_PER_10S : GLOBAL_POW_TAG_MAX_PER_10S
+    const clientMap = isJob ? this.clientJobRequestWindows : this.clientPowTagRequestWindows
+    const globalState = isJob ? this.globalJobRequestWindow : this.globalPowTagRequestWindow
+    const client_id = this.client_id(conn)
+
+    const clientOk = this.allow_client_window(clientMap, conn, now, perClientLimit, REQUEST_RATE_WINDOW_MS)
+    const globalOk = this.allow_global_window(globalState, now, globalLimit, REQUEST_RATE_WINDOW_MS)
+    if (clientOk && globalOk) return true
+
+    const strikes = (this.clientRequestSpamStrikes.get(conn) || 0) + 1
+    this.clientRequestSpamStrikes.set(conn, strikes)
+    logPow('rate_limit', {
+      status: 'reject',
+      type: kind,
+      client_id,
+      id,
+      strikes,
+      scope: !clientOk ? 'client' : 'global',
+      windowMs: REQUEST_RATE_WINDOW_MS,
+      clientLimit: perClientLimit,
+      globalLimit
+    })
+    this.send(conn, { success: false, reason: 'rate_limit', id })
+    if (strikes >= CLIENT_REQUEST_SPAM_STRIKES) {
+      this.network.timeout(info, conn)
+      this.clientRequestSpamStrikes.delete(conn)
+      this.clientJobRequestWindows.delete(conn)
+      this.clientPowTagRequestWindows.delete(conn)
+      logPow('rate_limit', { status: 'timeout', type: kind, client_id, id })
+    }
+    return false
   }
 
   // Cheap validation only
@@ -113,6 +191,51 @@ class HuginNode extends EventEmitter {
     }
 
     logPow('pow_precheck', { status: 'ok', jobId: message && message.pow && message.pow.job && message.pow.job.job_id, shares: shares.length })
+    return MESSAGE_VERIFIED
+  }
+
+  // Cheap validation for register payloads (push token registration path).
+  // Mirrors cheap_pow() but validates the packet-level shape:
+  // { register: true, data: <encrypted payload>, hash, pow }.
+  cheap_pow_register(payload) {
+    if (!payload || typeof payload !== 'object') {
+      logPow('pow_precheck_register', { status: 'reject', reason: 'wrong_message_format' })
+      return WRONG_MESSAGE_FORMAT
+    }
+    if (payload.register !== true) {
+      logPow('pow_precheck_register', { status: 'reject', reason: 'wrong_message_format' })
+      return WRONG_MESSAGE_FORMAT
+    }
+    if (typeof payload.data !== 'string' || payload.data.length === 0) {
+      logPow('pow_precheck_register', { status: 'reject', reason: 'wrong_message_format' })
+      return WRONG_MESSAGE_FORMAT
+    }
+    const v = payload && payload.pow && typeof payload.pow.version === 'number'
+      ? payload.pow.version
+      : 1
+    if (v !== POW_VERSION) {
+      logPow('pow_precheck_register', { status: 'reject', reason: 'wrong_pow_version', v })
+      return POW_INVALID
+    }
+
+    const ok = this.pow_check_fast_payload(payload.hash, payload.pow)
+    if (!ok) {
+      logPow('pow_precheck_register', {
+        status: 'reject',
+        reason: 'fast_check_failed',
+        jobId: payload && payload.pow && payload.pow.job && payload.pow.job.job_id
+      })
+      return POW_INVALID
+    }
+
+    const shares = payload && payload.pow && Array.isArray(payload.pow.shares)
+      ? payload.pow.shares
+      : []
+    logPow('pow_precheck_register', {
+      status: 'ok',
+      jobId: payload && payload.pow && payload.pow.job && payload.pow.job.job_id,
+      shares: shares.length
+    })
     return MESSAGE_VERIFIED
   }
 
@@ -391,8 +514,22 @@ class HuginNode extends EventEmitter {
 
     if ('type' in data) {
       if (data.type === 'job_request') {
+        if (!this.rate_limit_request('job_request', conn, info, data && data.id)) return
         logPow('client_cmd', { client_id, type: 'job_request' })
         this.job_request(conn, data)
+        return
+      }
+      if (data.type === 'pow_tag') {
+        if (!this.rate_limit_request('pow_tag', conn, info, data && data.id)) return
+        const hash = typeof data.hash === 'string' ? data.hash : ''
+        const id = data.id
+        logPow('client_cmd', { client_id, type: 'pow_tag', id })
+        if (hash.length !== 64 || !isHexString(hash)) {
+          this.send(conn, { success: false, reason: 'invalid_hash', id })
+          return
+        }
+        const tagValue = nonceTagFromMessageHash(hash, NONCE_TAG_BITS)
+        this.send(conn, { success: true, id, tagValue, nonceTagBits: NONCE_TAG_BITS })
         return
       }
       if (data.type === 'share') {
@@ -411,11 +548,73 @@ class HuginNode extends EventEmitter {
       }
      }
 
-     //Forward encrypted register requests.
      if ('register' in data) {
-       this.network.notify(data)
-     } 
+      await this.client_register(data, info, conn)
+      return
+     }
 
+  }
+
+  async client_register(data, info, conn) {
+    const client_id = this.client_id(conn)
+    const now = this.nowMs()
+    const id = typeof data.id === 'number' ? data.id : data.timestamp
+
+    const lastAccepted = this.clientPostLastAcceptedAt.get(conn) || 0
+    if ((now - lastAccepted) < CLIENT_POST_COOLDOWN_MS) {
+      logPow('client_register', { status: 'reject', reason: 'cooldown', client_id, id })
+      this.send(conn, { success: false, reason: 'cooldown', id })
+      return
+    }
+
+    const pre = this.cheap_pow_register(data)
+    if (!pre.success) {
+      const strikes = (this.clientInvalidShareStrikes.get(conn) || 0) + 1
+      this.clientInvalidShareStrikes.set(conn, strikes)
+      logPow('client_register', { status: 'reject', reason: pre.reason, client_id, strikes, id, jobId: data && data.pow && data.pow.job && data.pow.job.job_id })
+      this.send(conn, { reason: pre.reason, success: false, id })
+      if (strikes >= 2) {
+        this.network.ban(info, conn)
+      }
+      return
+    }
+
+    const shares = data && data.pow && Array.isArray(data.pow.shares) ? data.pow.shares : []
+    let accepted = false
+    const rejects = []
+    for (const share of shares.slice(0, MAX_SHARES_PER_MESSAGE)) {
+      const poolRes = await this.poolConnector.submitShare({
+        job_id: share.job_id,
+        nonce: share.nonce,
+        result: share.result
+      })
+      if (poolRes && poolRes.ok) {
+        accepted = true
+        break
+      }
+      rejects.push({
+        reason: poolRes && poolRes.reason ? poolRes.reason : 'unknown',
+        error: poolRes && poolRes.error
+          ? (poolRes.error.message || poolRes.error.code || String(poolRes.error))
+          : null
+      })
+    }
+
+    if (!accepted) {
+      logPow('client_register', { status: 'reject', reason: 'pool_reject', client_id, id, jobId: data && data.pow && data.pow.job && data.pow.job.job_id, rejects })
+      this.send(conn, { reason: 'pool_reject', success: false, id, rejects })
+      if (this.poolJob) {
+        try {
+          this.send(conn, { type: 'job', job: this.poolJob })
+        } catch (_) {}
+      }
+      return
+    }
+
+    this.clientPostLastAcceptedAt.set(conn, now)
+    this.clientInvalidShareStrikes.delete(conn)
+    this.send(conn, { success: true, id })
+    this.network.notify(data)
   }
 
   async client_post(data, info, conn) {
@@ -719,44 +918,133 @@ class HuginNode extends EventEmitter {
     return true
   }
 
+  validate_pow_payload(messageHash, pow, { requireFreshTemplate = true } = {}) {
+    if (!this.poolConnector) return { ok: false, reason: 'no_pool_connector' }
+    const job = pow && pow.job
+    const shares = pow && Array.isArray(pow.shares) ? pow.shares : []
+    if (typeof messageHash !== 'string' || messageHash.length !== 64 || !isHexString(messageHash)) {
+      return { ok: false, reason: 'invalid_hash' }
+    }
+    if (!job || typeof job !== 'object') return { ok: false, reason: 'invalid_job' }
+    if (typeof job.job_id !== 'string' || job.job_id.length > 32) return { ok: false, reason: 'invalid_job_id' }
+    if (!isHexString(job.blob)) return { ok: false, reason: 'invalid_blob' }
+    if (job.blob.length % 2 !== 0) return { ok: false, reason: 'invalid_blob_len' }
+    if ((job.blob.length / 2) > MAX_JOB_BLOB_HEX_BYTES) return { ok: false, reason: 'blob_too_large' }
+    if (!isHexString(job.target) || job.target.length !== 8) return { ok: false, reason: 'invalid_target' }
+    if (!Array.isArray(shares) || shares.length === 0) return { ok: false, reason: 'no_shares' }
+    if (shares.length > MAX_SHARES_PER_MESSAGE) return { ok: false, reason: 'too_many_shares' }
+
+    const prevId = extractPrevIdFromBlob(job.blob)
+    if (!prevId) return { ok: false, reason: 'no_prev_id', job, shares }
+    if (requireFreshTemplate && !this.currentPrevId) {
+      return { ok: false, reason: 'no_current_prev_id', job, shares }
+    }
+    if (
+      requireFreshTemplate &&
+      prevId !== this.currentPrevId &&
+      prevId !== this.previousPrevId &&
+      prevId !== this.twoBackPrevId
+    ) {
+      return { ok: false, reason: 'prev_id_mismatch', job, shares, prevId }
+    }
+
+    const tagValue = nonceTagFromMessageHash(messageHash, NONCE_TAG_BITS)
+    return {
+      ok: true,
+      job,
+      shares: shares.slice(0, MAX_SHARES_PER_MESSAGE),
+      tagValue,
+      prevId
+    }
+  }
+
+  validate_share_fast(share, jobId, tagValue) {
+    if (!share || share.job_id !== jobId) return { ok: false, reason: 'job_id_mismatch' }
+    if (typeof share.nonce !== 'string' || share.nonce.length !== 8 || !isHexString(share.nonce)) {
+      return { ok: false, reason: 'bad_nonce' }
+    }
+    if (typeof share.result !== 'string' || share.result.length !== 64 || !isHexString(share.result)) {
+      return { ok: false, reason: 'bad_result' }
+    }
+    if (!nonceMatchesTag(share.nonce, tagValue, NONCE_TAG_BITS)) {
+      logPow('pow_tag_mismatch_detail', {
+        jobId: jobId,
+        nonce: share.nonce,
+        nonceLowBits: nonceLowBits(share.nonce, NONCE_TAG_BITS),
+        expectedTagValue: tagValue,
+        nonceTagBits: NONCE_TAG_BITS,
+      })
+      return { ok: false, reason: 'tag_mismatch' }
+    }
+    return { ok: true }
+  }
+
   // Cheap local checks only (no slow hash).
   // Used for client -> node precheck before pool submission.
   pow_check_fast(message) {
-    if (!this.poolConnector) return false
-    const job = message.pow.job
-    const shares = message.pow.shares || []
-    if (!job || !job.job_id || !job.blob || !job.target) return false
-    if (!Array.isArray(shares) || shares.length === 0) return false
-
-    const prevId = extractPrevIdFromBlob(job.blob)
-    if (!prevId || !this.currentPrevId) {
-      logPow('pow_check_fast', { status: 'reject', reason: 'no_prev_id', jobId: job.job_id })
-      return false
-    }
-    if (prevId !== this.currentPrevId && prevId !== this.previousPrevId && prevId !== this.twoBackPrevId) {
-      logPow('pow_check_fast', { status: 'reject', reason: 'prev_id_mismatch', jobId: job.job_id })
+    const validated = this.validate_pow_payload(message.hash, message.pow, { requireFreshTemplate: true })
+    if (!validated.ok) {
+      logPow('pow_check_fast', { status: 'reject', reason: validated.reason, jobId: validated.job && validated.job.job_id })
       return false
     }
 
-    const tagValue = nonceTagFromMessageHash(message.hash, NONCE_TAG_BITS)
+    const { job, shares, tagValue } = validated
     let jobIdMismatch = 0
     let badNonce = 0
     let badResult = 0
     let tagMismatch = 0
-    for (const share of shares.slice(0, MAX_SHARES_PER_MESSAGE)) {
-      if (!share || share.job_id !== job.job_id) {
+    for (const share of shares) {
+      const check = this.validate_share_fast(share, job.job_id, tagValue)
+      if (!check.ok && check.reason === 'job_id_mismatch') {
         jobIdMismatch++
         continue
       }
-      if (typeof share.nonce !== 'string' || share.nonce.length !== 8 || !isHexString(share.nonce)) {
+      if (!check.ok && check.reason === 'bad_nonce') {
         badNonce++
         continue
       }
-      if (typeof share.result !== 'string' || share.result.length !== 64 || !isHexString(share.result)) {
+      if (!check.ok && check.reason === 'bad_result') {
         badResult++
         continue
       }
-      if (!nonceMatchesTag(share.nonce, tagValue, NONCE_TAG_BITS)) {
+      if (!check.ok && check.reason === 'tag_mismatch') {
+        tagMismatch++
+        continue
+      }
+      logPow('pow_check_fast', { status: 'ok', jobId: job.job_id })
+      return true
+    }
+    logPow('pow_check_fast', { status: 'reject', reason: 'no_matching_share', jobId: job.job_id, counts: { jobIdMismatch, badNonce, badResult, tagMismatch }, total: shares.length })
+    return false
+  }
+
+  pow_check_fast_payload(messageHash, pow) {
+    const validated = this.validate_pow_payload(messageHash, pow, { requireFreshTemplate: true })
+    if (!validated.ok) {
+      logPow('pow_check_fast', { status: 'reject', reason: validated.reason, jobId: validated.job && validated.job.job_id })
+      return false
+    }
+
+    const { job, shares, tagValue } = validated
+    let jobIdMismatch = 0
+    let badNonce = 0
+    let badResult = 0
+    let tagMismatch = 0
+    for (const share of shares) {
+      const check = this.validate_share_fast(share, job.job_id, tagValue)
+      if (!check.ok && check.reason === 'job_id_mismatch') {
+        jobIdMismatch++
+        continue
+      }
+      if (!check.ok && check.reason === 'bad_nonce') {
+        badNonce++
+        continue
+      }
+      if (!check.ok && check.reason === 'bad_result') {
+        badResult++
+        continue
+      }
+      if (!check.ok && check.reason === 'tag_mismatch') {
         tagMismatch++
         continue
       }
@@ -771,23 +1059,13 @@ class HuginNode extends EventEmitter {
   // Does NOT check prev_id freshness against our pool template (nodes can use different pools/templates).
   async pow_check_gossip(message) {
     if (!message || !message.pow) return false
-    if (!this.poolConnector) return false
-    const job = message.pow.job
-    const shares = message.pow.shares || []
-    if (!job || !job.job_id || !job.blob || !job.target) return false
-    if (!Array.isArray(shares) || shares.length === 0) return false
-
-    const prevId = extractPrevIdFromBlob(job.blob)
-    if (!prevId) return false
-
-    const tagValue = nonceTagFromMessageHash(message.hash, NONCE_TAG_BITS)
-    const cappedShares = shares.slice(0, MAX_SHARES_PER_MESSAGE)
+    const validated = this.validate_pow_payload(message.hash, message.pow, { requireFreshTemplate: false })
+    if (!validated.ok) return false
+    const { job, shares: cappedShares, tagValue } = validated
     const candidates = []
     for (const share of cappedShares) {
-      if (!share || share.job_id !== job.job_id) continue
-      if (typeof share.nonce !== 'string' || share.nonce.length !== 8 || !isHexString(share.nonce)) continue
-      if (typeof share.result !== 'string' || share.result.length !== 64 || !isHexString(share.result)) continue
-      if (!nonceMatchesTag(share.nonce, tagValue, NONCE_TAG_BITS)) continue
+      const check = this.validate_share_fast(share, job.job_id, tagValue)
+      if (!check.ok) continue
       candidates.push(share)
     }
     if (!candidates.length) return false
@@ -802,29 +1080,17 @@ class HuginNode extends EventEmitter {
   }
 
   async pow_check(message) {
-    if (!this.poolConnector) return false
-    const job = message.pow.job
-    const shares = message.pow.shares || []
-    if (!job || !job.job_id || !job.blob || !job.target) return false
-    if (!Array.isArray(shares) || shares.length === 0) return false
-
-    // Freshness check: accept only current/previous block templates (last 3 prev_ids).
-    const prevId = extractPrevIdFromBlob(job.blob)
-    if (!prevId || !this.currentPrevId) {
-      logPow('pow_check_stale', { reason: 'no_prev_id', jobId: job.job_id })
-      return false
-    }
-    if (prevId !== this.currentPrevId && prevId !== this.previousPrevId && prevId !== this.twoBackPrevId) {
-      logPow('pow_check_stale', { reason: 'prev_id_mismatch', jobId: job.job_id })
+    const validated = this.validate_pow_payload(message.hash, message.pow, { requireFreshTemplate: true })
+    if (!validated.ok) {
+      logPow('pow_check_stale', { reason: validated.reason, jobId: validated.job && validated.job.job_id })
       return false
     }
 
+    const { job, shares: cappedShares, tagValue } = validated
     const required = this.pow_target(message.hash)
-    const tagValue = nonceTagFromMessageHash(message.hash, NONCE_TAG_BITS)
     
     // Slow verification (random-sampled)
     let valid = 0
-    const cappedShares = shares.slice(0, MAX_SHARES_PER_MESSAGE)
     const toCheck = cappedShares.length
       ? [cappedShares[Math.floor(Math.random() * cappedShares.length)]]
       : []
@@ -836,19 +1102,20 @@ class HuginNode extends EventEmitter {
     let verifyFail = 0
     for (const share of toCheck) {
       checked++
-      if (!share || share.job_id !== job.job_id) {
+      const check = this.validate_share_fast(share, job.job_id, tagValue)
+      if (!check.ok && check.reason === 'job_id_mismatch') {
         jobIdMismatch++
         continue
       }
-      if (typeof share.nonce !== 'string' || share.nonce.length !== 8 || !isHexString(share.nonce)) {
+      if (!check.ok && check.reason === 'bad_nonce') {
         badNonce++
         continue
       }
-      if (typeof share.result !== 'string' || share.result.length !== 64 || !isHexString(share.result)) {
+      if (!check.ok && check.reason === 'bad_result') {
         badResult++
         continue
       }
-      if (!nonceMatchesTag(share.nonce, tagValue, NONCE_TAG_BITS)) {
+      if (!check.ok && check.reason === 'tag_mismatch') {
         tagMismatch++
         continue
       }
