@@ -46,17 +46,6 @@ function isHexString(value) {
   return typeof value === 'string' && /^[0-9a-f]+$/i.test(value)
 }
 
-function nonceLowBits(nonceHex, bits) {
-  if (typeof nonceHex !== 'string' || nonceHex.length !== 8 || !isHexString(nonceHex)) return null
-  const b = typeof bits === 'number' ? bits : 0
-  if (b <= 0 || b > 16) return null
-  const bytes = Buffer.from(nonceHex, 'hex')
-  if (bytes.length !== 4) return null
-  const nonce = ((bytes[0]) | (bytes[1] << 8) | (bytes[2] << 16) | (bytes[3] << 24)) >>> 0
-  const mask = (1 << b) - 1
-  return nonce & mask
-}
-
 class HuginNode extends EventEmitter {
   
   constructor(options = {}) {
@@ -967,13 +956,6 @@ class HuginNode extends EventEmitter {
       return { ok: false, reason: 'bad_result' }
     }
     if (!nonceMatchesTag(share.nonce, tagValue, NONCE_TAG_BITS)) {
-      logPow('pow_tag_mismatch_detail', {
-        jobId: jobId,
-        nonce: share.nonce,
-        nonceLowBits: nonceLowBits(share.nonce, NONCE_TAG_BITS),
-        expectedTagValue: tagValue,
-        nonceTagBits: NONCE_TAG_BITS,
-      })
       return { ok: false, reason: 'tag_mismatch' }
     }
     return { ok: true }
