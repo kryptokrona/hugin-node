@@ -39,8 +39,8 @@ async function save(message) {
   await db.insert('@messages/messages', {
     cipher,
     timestamp,
-    pub,
     hash,
+    pub,
     signature
   });
 
