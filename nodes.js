@@ -752,16 +752,19 @@ class HuginNode extends EventEmitter {
     const client_id = this.client_id(conn)
     const now = this.nowMs()
     const id = typeof data.id === 'number' ? data.id : data.timestamp
+    console.log(chalk.cyan(`[register] Received register packet from client ${client_id}`))
 
     const lastAccepted = this.clientPostLastAcceptedAt.get(conn) || 0
     if ((now - lastAccepted) < CLIENT_POST_COOLDOWN_MS) {
       logPow('client_register', { status: 'reject', reason: 'cooldown', client_id, id })
+      console.log(chalk.yellow(`[register] Cooldown reject for client ${client_id}`))
       this.send(conn, { success: false, reason: 'cooldown', id })
       return
     }
 
     if (this.has_accepted_pow_auth(data && data.hash, data && data.pow)) {
       logPow('client_register', { status: 'duplicate', client_id, id })
+      console.log(chalk.yellow(`[register] Duplicate register packet from client ${client_id}`))
       this.send(conn, { success: true, duplicate: true, id })
       return
     }
@@ -771,12 +774,14 @@ class HuginNode extends EventEmitter {
       const strikes = (this.clientInvalidShareStrikes.get(conn) || 0) + 1
       this.clientInvalidShareStrikes.set(conn, strikes)
       logPow('client_register', { status: 'reject', reason: pre.reason, client_id, strikes, id, jobId: data && data.pow && data.pow.job && data.pow.job.job_id })
+      console.log(chalk.red(`[register] Cheap PoW rejected for client ${client_id}: ${pre.reason}`))
       this.send(conn, { reason: pre.reason, success: false, id })
       if (strikes >= 2) {
         this.network.ban(info, conn)
       }
       return
     }
+    console.log(chalk.green(`[register] Cheap PoW accepted for client ${client_id}`))
 
     const shares = data && data.pow && Array.isArray(data.pow.shares) ? data.pow.shares : []
     const submitRes = await this.submit_message_shares_with_reauth(shares, this.poolConnector)
@@ -785,6 +790,7 @@ class HuginNode extends EventEmitter {
 
     if (!accepted) {
       logPow('client_register', { status: 'reject', reason: 'pool_reject', client_id, id, jobId: data && data.pow && data.pow.job && data.pow.job.job_id, rejects })
+      console.log(chalk.red(`[register] Pool rejected register packet from client ${client_id}`), rejects)
       this.send(conn, { reason: 'pool_reject', success: false, id, rejects })
       if (this.poolJob) {
         try {
@@ -798,6 +804,7 @@ class HuginNode extends EventEmitter {
     this.clientInvalidShareStrikes.delete(conn)
     this.mark_accepted_pow_auth(data && data.hash, data && data.pow)
     this.send(conn, { success: true, id })
+    console.log(chalk.green(`[register] Pool accepted register packet from client ${client_id}, forwarding to node-server`))
     this.network.notify(data)
   }
 
