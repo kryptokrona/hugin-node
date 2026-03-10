@@ -44,6 +44,8 @@ function isHexString(value) {
   return typeof value === 'string' && /^[0-9a-f]+$/i.test(value)
 }
 
+const MESSAGE_KINDS = new Set(['dm', 'call', 'room'])
+
 class HuginNode extends EventEmitter {
   
   constructor(options = {}) {
@@ -315,11 +317,32 @@ class HuginNode extends EventEmitter {
 
   pow_auth_context_message(message) {
     const cipher = message && typeof message.cipher === 'string' ? message.cipher : ''
-    return cipher
+    const kind = message && typeof message.kind === 'string' ? message.kind : ''
+    return kind ? `${kind}:${cipher}` : cipher
   }
 
   pow_auth_context_register(payload) {
     return payload && typeof payload.data === 'string' ? payload.data : ''
+  }
+
+  is_register_packet(payload) {
+    return !!payload && typeof payload === 'object' && payload.register === true
+  }
+
+  message_kind(message) {
+    if (!message || typeof message !== 'object') return 'dm'
+    return typeof message.kind === 'string' ? message.kind : 'dm'
+  }
+
+  should_store_message(message) {
+    return this.message_kind(message) === 'dm'
+  }
+
+  register_packet_id(payload) {
+    if (!payload || typeof payload !== 'object') return 'unknown'
+    if (typeof payload.hash === 'string' && payload.hash.length > 0) return payload.hash
+    if (typeof payload.id === 'number') return String(payload.id)
+    return 'unknown'
   }
 
   verify_pow_auth(messageHash, timestamp, pow, context = '') {
@@ -665,26 +688,8 @@ class HuginNode extends EventEmitter {
     }
 
     if ('push' in data) {
-      // only do cheap checks here (push server will do full verification).
-      const message = data && data.message
-      if (!message || typeof message !== 'object') return
-      // Some forwarded node payloads (e.g. register) are not PoW messages.
-      // Ignore them here instead of banning the peer.
-      if (!this.check(message)) return
-
-      const pre = await this.cheap_pow(message, null)
-      if (!pre.success) {
-        console.log("Failed to add message:", pre.reason)
-        console.log(chalk.red("Invalid node push message, ban node"))
-        this.network.ban(info, conn)
-        return
-      }
-      const add = await this.add(message, true)
-      if (!add.success) {
-        console.log("Failed to add message:", add.reason)
-        console.log(chalk.red("Invalid node push message, ban node"))
-        this.network.ban(info, conn)
-      }
+      // Push packets are meant for the node-server cluster.
+      // Hugin-nodes ignore them and rely on `signal` gossip for DM pool storage.
       return
     }
 
@@ -783,6 +788,20 @@ class HuginNode extends EventEmitter {
     }
     console.log(chalk.green(`[register] Cheap PoW accepted for client ${client_id}`))
 
+    const verifiedShare = await this.pow_check_register(data)
+    if (!verifiedShare) {
+      const strikes = (this.clientInvalidShareStrikes.get(conn) || 0) + 1
+      this.clientInvalidShareStrikes.set(conn, strikes)
+      logPow('client_register', { status: 'reject', reason: 'pow_verify_failed', client_id, strikes, id, jobId: data && data.pow && data.pow.job && data.pow.job.job_id })
+      console.log(chalk.red(`[register] Share verification rejected for client ${client_id}`))
+      this.send(conn, { reason: 'pow_verify_failed', success: false, id })
+      if (strikes >= 2) {
+        this.network.ban(info, conn)
+      }
+      return
+    }
+    console.log(chalk.green(`[register] Share verification accepted for client ${client_id}`))
+
     const shares = data && data.pow && Array.isArray(data.pow.shares) ? data.pow.shares : []
     const submitRes = await this.submit_message_shares_with_reauth(shares, this.poolConnector)
     const accepted = submitRes.accepted
@@ -812,6 +831,7 @@ class HuginNode extends EventEmitter {
     // 1s cooldown per client between ACCEPTED propagated messages
     const now = this.nowMs()
     const message = data.message
+    const kind = this.message_kind(message)
     const client_id = this.client_id(conn)
     if (POW_DEBUG) {
       logPow('client_post', {
@@ -857,6 +877,18 @@ class HuginNode extends EventEmitter {
       return
     }
 
+    const verifiedShare = await this.pow_check(message)
+    if (!verifiedShare) {
+      const strikes = (this.clientInvalidShareStrikes.get(conn) || 0) + 1
+      this.clientInvalidShareStrikes.set(conn, strikes)
+      logPow('client_post', { status: 'reject', reason: 'pow_verify_failed', client_id, strikes, id: message && message.id, jobId: message && message.pow && message.pow.job && message.pow.job.job_id })
+      this.send(conn, { reason: 'pow_verify_failed', success: false, id: message && message.id })
+      if (strikes >= 2) {
+        this.network.ban(info, conn)
+      }
+      return
+    }
+
     const tPool = process.hrtime.bigint()
     const submitRes = await this.submit_message_shares_with_reauth(shares, this.poolConnector)
     const accepted = submitRes.accepted
@@ -878,29 +910,35 @@ class HuginNode extends EventEmitter {
     }
     logPow('client_post', { status: 'pool_ok', client_id, id: message && message.id, jobId: message && message.pow && message.pow.job && message.pow.job.job_id })
 
-    // Pool accepted at least one share => store without re-verifying, then relay
-    const added = await this.add(message, true)
-    if (!added.success) {
-      logPow('client_post', { status: 'reject', reason: 'store_failed', client_id, id: message && message.id })
-      this.send(conn, { reason: added.reason, success: false, id: message && message.id })
-      return
-    }
-    if (added.duplicate) {
-      logPow('client_post', { status: 'duplicate', client_id, id: message && message.id })
-      this.send(conn, { success: true, duplicate: true, id: message && message.id })
-      return
+    let added = { success: true, duplicate: false }
+    if (this.should_store_message(message)) {
+      // Pool accepted at least one share => store without re-verifying, then relay
+      added = await this.add(message, true)
+      if (!added.success) {
+        logPow('client_post', { status: 'reject', reason: 'store_failed', client_id, id: message && message.id })
+        this.send(conn, { reason: added.reason, success: false, id: message && message.id })
+        return
+      }
+      if (added.duplicate) {
+        logPow('client_post', { status: 'duplicate', client_id, id: message && message.id })
+        this.send(conn, { success: true, duplicate: true, id: message && message.id })
+        return
+      }
     }
 
     this.clientPostLastAcceptedAt.set(conn, now)
     this.clientInvalidShareStrikes.delete(conn)
+    this.mark_accepted_pow_auth(message && message.hash, message && message.pow)
     logPow('client_post', { status: 'ok', client_id, id: message && message.id })
     this.send(conn, { success: true, id: message && message.id })
 
-    const v = message && message.pow && typeof message.pow.version === 'number'
-      ? message.pow.version
-      : 1
-    if (v === POW_VERSION) {
-      this.gossip(message)
+    if (this.should_store_message(message)) {
+      const v = message && message.pow && typeof message.pow.version === 'number'
+        ? message.pow.version
+        : 1
+      if (v === POW_VERSION) {
+        this.gossip(message)
+      }
     }
 
     if ('push' in message) {
@@ -1050,6 +1088,10 @@ class HuginNode extends EventEmitter {
 
     if (message.cipher.length > 4096) return false
     if (!isHexString(message.cipher)) return false
+    if (message.kind !== undefined) {
+      if (typeof message.kind !== 'string') return false
+      if (!MESSAGE_KINDS.has(message.kind)) return false
+    }
     if (message.hash.length > 64) return false
     if (!isHexString(message.hash)) return false
     if (message.timestamp < 0) return false
@@ -1263,6 +1305,45 @@ class HuginNode extends EventEmitter {
       counts: { jobIdMismatch, badNonce, badResult, verifyFail }
     })
     return false
+  }
+
+  async pow_check_register(payload) {
+    const authCheck = this.verify_pow_auth(
+      payload && payload.hash,
+      payload && payload.timestamp,
+      payload && payload.pow,
+      this.pow_auth_context_register(payload)
+    )
+    if (!authCheck.ok) {
+      logPow('pow_check_register', {
+        reason: authCheck.reason,
+        jobId: payload && payload.pow && payload.pow.job && payload.pow.job.job_id
+      })
+      return false
+    }
+
+    const validated = this.validate_pow_payload(payload && payload.hash, payload && payload.pow, { requireFreshTemplate: true })
+    if (!validated.ok) {
+      logPow('pow_check_register', { reason: validated.reason, jobId: validated.job && validated.job.job_id })
+      return false
+    }
+
+    const { job, shares: cappedShares } = validated
+    const candidates = []
+    for (const share of cappedShares) {
+      const check = this.validate_share_fast(share, job.job_id)
+      if (!check.ok) continue
+      candidates.push(share)
+    }
+    if (!candidates.length) {
+      logPow('pow_check_register', { reason: 'no_matching_share', jobId: job.job_id })
+      return false
+    }
+
+    const share = candidates[Math.floor(Math.random() * candidates.length)]
+    const ok = await this.poolConnector.verifyShare(job, share.nonce, share.result)
+    logPow('pow_check_register', { status: ok ? 'ok' : 'reject', jobId: job.job_id, nonce: share.nonce })
+    return ok
   }
 
   isrequest(req) {
