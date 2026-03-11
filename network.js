@@ -11,6 +11,10 @@ class Network extends EventEmitter {
     this.keys = create_keys_from_seed(seed) //Deterministic dht keys.
     this.nodes = []
     this.clients = []
+    this.clientMessageQueue = []
+    this.clientMessageFlushTimer = setInterval(() => {
+      this.flush_client_messages()
+    }, 3000)
   }
 
 async swarm(key, priv = false, pub = false) {
@@ -162,9 +166,16 @@ notify(message) {
 
 //Notify clients of new message.
 onmessage(message) {
+  if (!message || typeof message !== 'object') return
+  this.clientMessageQueue.push(message)
+}
+
+flush_client_messages() {
+  if (this.clientMessageQueue.length === 0) return
+  const messages = this.clientMessageQueue.splice(0, this.clientMessageQueue.length)
   for (const c of this.clients) {
     try {
-      c.conn.write(JSON.stringify({type: 'new-message', message}))
+      c.conn.write(JSON.stringify({type: 'new-message', messages}))
     } catch (e) {
       this.clients = this.clients.filter(a => a.conn !== c.conn)
     }
