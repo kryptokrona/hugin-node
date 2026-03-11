@@ -1,6 +1,6 @@
 const EventEmitter = require('bare-events')
 const Hyperswarm = require('hyperswarm-hugin')
-const { create_keys_from_seed, get_new_peer_keys, parse } = require('./utils')
+const { create_keys_from_seed, get_new_peer_keys, parse, sleep } = require('./utils')
 const chalk = require('chalk');
 const { NodeId } = require('./id');
 const { NODE_VERSION, MAX_NODE_INBOUND_BYTES, MAX_CLIENT_INBOUND_BYTES } = require('./constants');
@@ -46,6 +46,7 @@ async swarm(key, priv = false, pub = false) {
   const topic = Buffer.alloc(32).fill(topicHash)
   const discovery = swarm.join(topic, {server: true, client: server ? false : true})
   await discovery.flushed()
+  if (!server) this.refresh(discovery)
 }
 
 // Node is connected to other nodes.
@@ -183,6 +184,11 @@ timeout(info, conn) {
   this.ban(info, conn)
   if (!info) return
   setTimeout(() => info.ban(false), 60000)
+}
+
+async refresh(discovery) {
+  await sleep(30000)
+  setInterval(() => discovery.refresh({client: true, server: true}), 60000)
 }
 
 }
