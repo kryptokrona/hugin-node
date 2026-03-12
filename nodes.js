@@ -34,10 +34,45 @@ const {
   REQUEST_RATE_WINDOW_MS,
   CLIENT_REQUEST_SPAM_STRIKES } = require('./constants')
 
-const logPow = (...args) => {
-  if (POW_DEBUG) {
-    console.log('[pow]', ...args)
+function should_log_pow_failure(event, data) {
+  const eventName = typeof event === 'string' ? event.toLowerCase() : ''
+  const eventFailureTokens = [
+    'reject',
+    'fail',
+    'error',
+    'invalid',
+    'timeout',
+    'stale',
+    'mismatch',
+    'low_diff',
+    'rate_limit'
+  ]
+  if (eventFailureTokens.some((token) => eventName.includes(token))) return true
+
+  if (!data || typeof data !== 'object') return false
+
+  const status = typeof data.status === 'string' ? data.status.toLowerCase() : ''
+  if (status && status !== 'ok' && status !== 'pool_ok' && status !== 'duplicate') return true
+
+  if (typeof data.ok === 'boolean' && data.ok === false) return true
+  if (typeof data.success === 'boolean' && data.success === false) return true
+
+  const reason = typeof data.reason === 'string' ? data.reason.toLowerCase() : ''
+  if (reason && reason !== 'ok' && reason !== 'none') return true
+
+  if (Array.isArray(data.rejects) && data.rejects.length > 0) return true
+
+  return false
+}
+
+const logPow = (event, data) => {
+  if (!POW_DEBUG) return
+  if (!should_log_pow_failure(event, data)) return
+  if (data === undefined) {
+    console.log('[pow]', event)
+    return
   }
+  console.log('[pow]', event, data)
 }
 
 function isHexString(value) {

@@ -18,7 +18,7 @@ const POW_INVALID = {success: false, reason: 'Invalid PoW shares.'}
 const NODE_VERSION = '2.0.0'
 
 // CONFIG (edit these constants to configure node behavior)
-const POW_DEBUG = true
+const POW_DEBUG = false
 
 // Pool / PoW defaults
 const DEFAULT_POOL_PORT = 3333
