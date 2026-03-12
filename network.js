@@ -4,6 +4,12 @@ const { create_keys_from_seed, get_new_peer_keys, parse, sleep } = require('./ut
 const chalk = require('chalk');
 const { NodeId } = require('./id');
 const { NODE_VERSION, MAX_NODE_INBOUND_BYTES, MAX_CLIENT_INBOUND_BYTES } = require('./constants');
+const RPC = require('bare-rpc')
+const b4a = require('b4a')
+
+const RPC_COMMANDS = Object.freeze({
+  PACKET: 1
+})
 
 class Network extends EventEmitter {
   constructor(seed) {
@@ -12,10 +18,43 @@ class Network extends EventEmitter {
     this.nodes = []
     this.clients = []
     this.clientMessageQueue = []
+    this.rpcPeers = new WeakMap()
     this.clientMessageFlushTimer = setInterval(() => {
       this.flush_client_messages()
     }, 5000)
   }
+
+setup_rpc(conn, info, inboundLimit, eventName) {
+  const rpc = new RPC(conn, (req) => {
+    if (req.data && req.data.length > inboundLimit) {
+      this.ban(info, conn)
+      return
+    }
+    const m = b4a.toString(req.data)
+    const data = parse(m)
+    if (!data) {
+      this.ban(info, conn)
+      return
+    }
+    this.emit(eventName, { conn, info, data })
+    req.reply(JSON.stringify({ ok: true, data: null, error: null }))
+  })
+  this.rpcPeers.set(conn, rpc)
+  return rpc
+}
+
+rpc_send(conn, payload) {
+  const rpc = this.rpcPeers.get(conn)
+  if (!rpc) return false
+  try {
+    const req = rpc.request(RPC_COMMANDS.PACKET)
+    req.send(JSON.stringify(payload))
+    req.reply().catch(() => {})
+    return true
+  } catch (e) {
+    return false
+  }
+}
 
 async swarm(key, priv = false, pub = false) {
   let [base_keys, dhtKeys, sig] = get_new_peer_keys(key)
@@ -87,22 +126,10 @@ async public_node(key) {
 node_connection(conn, info) {
   console.log(chalk.green("New node connection"))
   this.nodes.push({conn, info})
+  this.setup_rpc(conn, info, MAX_NODE_INBOUND_BYTES, 'node-data')
 
   // Send node version to other nodes
-  conn.write(JSON.stringify({version: NODE_VERSION}))
-  conn.on('data', (d) => {
-    if (d.length > MAX_NODE_INBOUND_BYTES) {
-      this.ban(info, conn)
-      return
-    }
-    const m = d.toString()
-    const data = parse(m)
-    if (!data) {
-      this.ban(info, conn)
-      return
-    }
-    this.emit('node-data', {conn, info, data})
-  })
+  this.rpc_send(conn, { version: NODE_VERSION })
   conn.on('error',() => {
     conn.end()
     conn.destroy()
@@ -116,22 +143,9 @@ node_connection(conn, info) {
 async client_connection(conn, info) {
   console.log(chalk.green("Incoming client connection"))
   this.clients.push({conn, info})
+  this.setup_rpc(conn, info, MAX_CLIENT_INBOUND_BYTES, 'client-data')
   //Send our node wallet address to client.
-  conn.write(JSON.stringify({address: NodeId.address, version: NODE_VERSION}))
-
-  conn.on('data', (d) => {
-    if (d.length > MAX_CLIENT_INBOUND_BYTES) {
-        this.ban(info, conn)
-        return
-    }
-    const m = d.toString()
-    const data = parse(m)
-    if (!data) {
-      this.ban(info, conn)
-      return
-    }
-    this.emit('client-data', {conn, info, data})
-  })
+  this.rpc_send(conn, {address: NodeId.address, version: NODE_VERSION})
   conn.on('error',() => {
     conn.end()
     conn.destroy()
@@ -146,7 +160,7 @@ async client_connection(conn, info) {
 signal(message) {
   for (const n of this.nodes) {
     try {
-      n.conn.write(JSON.stringify({signal: true, message}))
+      this.rpc_send(n.conn, {signal: true, message})
     } catch (e) {
       // drop dead connection
       this.nodes = this.nodes.filter(a => a.conn !== n.conn)
@@ -157,7 +171,7 @@ signal(message) {
 notify(message) {
   for (const n of this.nodes) {
     try {
-      n.conn.write(JSON.stringify({push: true, message}))
+      this.rpc_send(n.conn, {push: true, message})
     } catch (e) {
       this.nodes = this.nodes.filter(a => a.conn !== n.conn)
     }
@@ -175,7 +189,7 @@ flush_client_messages() {
   const messages = this.clientMessageQueue.splice(0, this.clientMessageQueue.length)
   for (const c of this.clients) {
     try {
-      c.conn.write(JSON.stringify({type: 'new-message', messages}))
+      this.rpc_send(c.conn, {type: 'new-message', messages})
     } catch (e) {
       this.clients = this.clients.filter(a => a.conn !== c.conn)
     }

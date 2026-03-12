@@ -1086,6 +1086,11 @@ class HuginNode extends EventEmitter {
   }
 
   send(conn, data) {
+    // Keep reply framing aligned with Network's bare-rpc transport.
+    if (this.network && typeof this.network.rpc_send === 'function') {
+      const sent = this.network.rpc_send(conn, data)
+      if (sent) return
+    }
     conn.write(JSON.stringify(data))
   }
 
