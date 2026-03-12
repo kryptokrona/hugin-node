@@ -7,11 +7,8 @@
 const net = require('net')
 const tls = require('tls')
 const EventEmitter = require('bare-events')
-const { Crypto } = require('kryptokrona-utils')
-const { insertNonce, meetsTarget } = require('hugin-utils')
+const { verifyShare } = require('hugin-utils')
 const { DEFAULT_POOL_PORT, DEFAULT_POOL_SSL, POW_DEBUG } = require('./constants')
-
-const crypto = new Crypto()
 
 function should_log_pow_failure(event, data) {
   const eventName = typeof event === 'string' ? event.toLowerCase() : ''
@@ -105,7 +102,6 @@ class PoolConnector extends EventEmitter {
     this.nextId = 1
     this.session = { id: null, job: null }
     this.validJobs = []
-    this.cn = crypto.cn_turtle_lite_slow_hash_v2
     this.reauthInFlight = false
   }
 
@@ -241,23 +237,11 @@ class PoolConnector extends EventEmitter {
     this.emit('job', job)
   }
 
-  async verifyShare(job, nonce, result) {
+  async verifyShareLocal(job, nonce, result) {
     try {
-      if (!job || !job.blob || !nonce || !result) return false
-      if (!/^[0-9a-fA-F]{8}$/.test(nonce)) return false
-
-      const { blobHex, offset } = insertNonce(job.blob, nonce)
-      logPow('nonce_offset', { jobId: job.job_id, offset })
-      const hashHex = await crypto.cn_turtle_lite_slow_hash_v2(blobHex)
-
-      if (hashHex !== result) {
-        logPow('share_mismatch', { jobId: job.job_id, nonce })
-        return false
-      }
-
-      const ok = meetsTarget(hashHex, job.target)
+      const ok = await verifyShare(job, nonce, result)
       if (!ok) {
-        logPow('share_low_diff', { jobId: job.job_id, nonce })
+        logPow('share_verify_failed', { jobId: job && job.job_id, nonce })
       }
       return ok
     } catch (err) {

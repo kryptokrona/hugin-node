@@ -7,7 +7,7 @@ const { PoolConnector, POOLS } = require('./pools')
 const { load, limit, save } = require('./storage')
 const {hash, chunk_array, sleep} = require('./utils')
 const chalk = require('chalk');
-const { extractPrevIdFromBlob } = require('hugin-utils')
+const { extractPrevIdFromBlob, verifyShare } = require('hugin-utils')
 const { 
   ONE_DAY, DAY_LIMIT, 
   SIGNATURE_ERROR, 
@@ -542,6 +542,8 @@ class HuginNode extends EventEmitter {
       console.log(chalk.red("No pools configured."))
       return
     }
+    const startupPool = POOLS[this.poolIndex]
+    console.log(chalk.cyan(`Connecting to pool ${startupPool.host}:${startupPool.port} (ssl: ${startupPool.ssl ? 'on' : 'off'})`))
     this.connect_pool(POOLS[this.poolIndex])
   }
 
@@ -1273,7 +1275,7 @@ class HuginNode extends EventEmitter {
 
     // Do one slow verification (random-sampled) to ensure the share is actually valid PoW for this job.
     const share = candidates[Math.floor(Math.random() * candidates.length)]
-    return await this.poolConnector.verifyShare(job, share.nonce, share.result)
+    return await this.poolConnector.verifyShareLocal(job, share.nonce, share.result)
   }
 
   pow_target(messageHash) {
@@ -1320,7 +1322,7 @@ class HuginNode extends EventEmitter {
         badResult++
         continue
       }
-      const ok = await this.poolConnector.verifyShare(job, share.nonce, share.result)
+      const ok = await this.poolConnector.verifyShareLocal(job, share.nonce, share.result)
       if (ok) {
         valid++
         logPow('pow_check_share', { status: 'ok', jobId: job.job_id, nonce: share.nonce })
@@ -1372,7 +1374,7 @@ class HuginNode extends EventEmitter {
     }
 
     const share = candidates[Math.floor(Math.random() * candidates.length)]
-    const ok = await this.poolConnector.verifyShare(job, share.nonce, share.result)
+    const ok = await this.poolConnector.verifyShareLocal(job, share.nonce, share.result)
     logPow('pow_check_register', { status: ok ? 'ok' : 'reject', jobId: job.job_id, nonce: share.nonce })
     return ok
   }
