@@ -1082,15 +1082,6 @@ class HuginNode extends EventEmitter {
     if (!powValid) {
       return POW_INVALID
     }
-    // if (!await NodeId.verify(message.pub)) {
-    //   return NOT_VERIFIED
-    // }
-    // if (!await Wallet.verify(message.cipher + message.hash, message.pub, message.signature)) {
-    //   return SIGNATURE_ERROR
-    // }
-    // if (this.limit(message.pub)) {
-    //   return LIMIT_REACHED
-    // }
     return MESSAGE_VERIFIED
   }
 
