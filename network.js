@@ -14,7 +14,7 @@ class Network extends EventEmitter {
     this.clientMessageQueue = []
     this.clientMessageFlushTimer = setInterval(() => {
       this.flush_client_messages()
-    }, 3000)
+    }, 5000)
   }
 
 async swarm(key, priv = false, pub = false) {
