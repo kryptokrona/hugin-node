@@ -15,7 +15,7 @@
     "bare-events": "^2.5.4",
     "bare-rpc": "^1.1.0",
     "chalk": "^4.1.2",
-    "hugin-utils": "^0.3.2",
+    "hugin-utils": "^0.4.0",
     "hyperdb": "^4.9.4",
     "hyperschema": "^1.10.4",
     "hyperswarm-hugin": "^1.0.4",
