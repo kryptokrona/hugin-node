@@ -1,6 +1,7 @@
 
 const chalk = require('chalk');
 const readline = require('readline');
+const { Address } = require('kryptokrona-utils');
 const { NodeId } = require('./id')
 const fs = require('fs');
 const { HuginNode } = require('./nodes');
@@ -14,6 +15,7 @@ const DEFAULT_CONFIG = {
   private: false,
   nodeId: ''
 }
+const ADDRESS_LENGTH = 99;
 
 function ensureConfigExists() {
   if (fs.existsSync(CONFIG_PATH)) return false
@@ -24,11 +26,72 @@ function ensureConfigExists() {
 function loadConfig() {
   try {
     if (!fs.existsSync(CONFIG_PATH)) return { ...DEFAULT_CONFIG }
-    const raw = fs.readFileSync('./config.json', 'utf8');
+    const raw = fs.readFileSync(CONFIG_PATH, 'utf8');
     return { ...DEFAULT_CONFIG, ...JSON.parse(raw) };
   } catch (e) {
     return { ...DEFAULT_CONFIG };
   }
+}
+
+function save_config(config) {
+  fs.writeFileSync(CONFIG_PATH, JSON.stringify({ ...DEFAULT_CONFIG, ...config }, null, 2))
+}
+
+async function is_valid_payout_address(address) {
+  if (typeof address !== 'string') return false
+  const value = address.trim()
+  if (value.length !== ADDRESS_LENGTH) return false
+  try {
+    await Address.fromAddress(value)
+    return true
+  } catch (e) {
+    return false
+  }
+}
+
+async function prompt_for_payout_address() {
+  const input = readline.createInterface({
+    input: process.stdin,
+    output: process.stdout
+  })
+
+  const question = (prompt) => new Promise((resolve) => input.question(prompt, resolve))
+  while (true) {
+    const value = await question(chalk.yellow('Enter payoutAddress: '))
+    const payoutAddress = String(value || '').trim()
+
+    if (!payoutAddress) {
+      console.log(chalk.red('payoutAddress cannot be empty. Please try again.'))
+      continue
+    }
+
+    if (payoutAddress.length !== ADDRESS_LENGTH) {
+      console.log(chalk.red(`payoutAddress must be exactly ${ADDRESS_LENGTH} characters.`))
+      continue
+    }
+
+    if (!await is_valid_payout_address(payoutAddress)) {
+      console.log(chalk.red('Invalid payoutAddress. Please enter a valid SEKR address.'))
+      continue
+    }
+
+    input.close()
+    return payoutAddress
+  }
+}
+
+async function ensure_payout_address() {
+  const config = loadConfig()
+  const payoutAddress = String(config.payoutAddress || '').trim()
+  if (await is_valid_payout_address(payoutAddress)) return
+
+  console.log(chalk.yellow('No valid payoutAddress found in config.'))
+  const enteredAddress = await prompt_for_payout_address()
+  save_config({
+    ...config,
+    payoutAddress: enteredAddress
+  })
+  console.log(chalk.green('Saved payoutAddress to config.json.'))
 }
 
 async function start_check() {
@@ -39,9 +102,8 @@ async function start_check() {
   const created = ensureConfigExists()
   if (created) {
     console.log(chalk.yellow('Created `config.json`.'))
-    console.log(chalk.yellow('Set `payoutAddress` in `config.json`, then restart the node.'))
-    return process.exit(0)
   }
+  await ensure_payout_address()
   return start_node();
 }
 
