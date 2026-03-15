@@ -204,4 +204,12 @@ const SHOW_STATS = async (node) => {
    //Number of relayed messages?
 }
 
+process.on('uncaughtException', (err) => {
+  console.log('Caught an unhandled exception:', err);
+});
+
+process.on('unhandledRejection', (reason, promise) => {
+  console.log('Unhandled Rejection at:', promise, 'reason:', reason);
+});
+
 start_check()
