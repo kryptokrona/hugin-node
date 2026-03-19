@@ -1051,7 +1051,11 @@ class HuginNode extends EventEmitter {
     //Verify and add message to pool.
     const verify = verified ? MESSAGE_VERIFIED : await this.verify(message)
     if (!verify.success) return verify
-    this.pool.set(message.hash, message);
+    const { pow, ...rest } = message
+    const stored = pow && typeof pow === 'object'
+      ? { ...rest, pow: { ...pow, job: undefined } }
+      : rest
+    this.pool.set(message.hash, stored);
     this.mark_accepted_pow_auth(message.hash, message.pow)
     console.log(chalk.yellow("Pool update. Number of messages:", this.pool.size))
     return verify

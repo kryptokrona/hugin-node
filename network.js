@@ -181,7 +181,11 @@ notify(message) {
 //Notify clients of new message.
 onmessage(message) {
   if (!message || typeof message !== 'object') return
-  this.clientMessageQueue.push(message)
+  const { pow, ...rest } = message
+  const clean = pow && typeof pow === 'object'
+    ? { ...rest, pow: { ...pow, job: undefined } }
+    : rest
+  this.clientMessageQueue.push(clean)
 }
 
 flush_client_messages() {
