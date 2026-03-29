@@ -1,3 +1,4 @@
+const { log } = require('./utils');
 /**
  * Pools module: configured pool list + pool connector implementation.
  *
@@ -44,10 +45,10 @@ const logPow = (event, data) => {
   if (!POW_DEBUG) return
   if (!should_log_pow_failure(event, data)) return
   if (data === undefined) {
-    console.log('[pow]', event)
+    log('[pow]', event)
     return
   }
-  console.log('[pow]', event, data)
+  log('[pow]', event, data)
 }
 
 // ---- Pool list config ----

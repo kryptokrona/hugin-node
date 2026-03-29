@@ -5,15 +5,15 @@ const { Network } = require('./network')
 const Keychains = require('keypear')
 const { PoolConnector, POOLS } = require('./pools')
 const { load, limit, save } = require('./storage')
-const {hash, chunk_array, sleep} = require('./utils')
+const { hash, chunk_array, sleep, log } = require('./utils')
 const chalk = require('chalk');
 const { extractPrevIdFromBlob, verifyShare } = require('hugin-utils')
-const { 
-  ONE_DAY, DAY_LIMIT, 
-  SIGNATURE_ERROR, 
-  WRONG_MESSAGE_FORMAT, 
-  MESSAGE_VERIFIED, 
-  LIMIT_REACHED, 
+const {
+  ONE_DAY, DAY_LIMIT,
+  SIGNATURE_ERROR,
+  WRONG_MESSAGE_FORMAT,
+  MESSAGE_VERIFIED,
+  LIMIT_REACHED,
   POW_INVALID,
   NOT_VERIFIED,
   POW_DEBUG,
@@ -69,10 +69,10 @@ const logPow = (event, data) => {
   if (!POW_DEBUG) return
   if (!should_log_pow_failure(event, data)) return
   if (data === undefined) {
-    console.log('[pow]', event)
+    log('[pow]', event)
     return
   }
-  console.log('[pow]', event, data)
+  log('[pow]', event, data)
 }
 
 function isHexString(value) {
@@ -82,7 +82,7 @@ function isHexString(value) {
 const MESSAGE_KINDS = new Set(['dm', 'call', 'room'])
 
 class HuginNode extends EventEmitter {
-  
+
   constructor(options = {}) {
     super()
     this.pool = new Map()
@@ -229,7 +229,7 @@ class HuginNode extends EventEmitter {
       if (connector.socket && connector.socket.writable && !connector.reauthInFlight) {
         try {
           connector.login()
-        } catch (_) {}
+        } catch (_) { }
       }
       await sleep(100)
     }
@@ -504,13 +504,13 @@ class HuginNode extends EventEmitter {
     // Public nodes are automatically found with fastest connection.
     if (pub) this.network.public_node(this.networkAddress)
 
-    
-    //Event listeners
-    this.network.on('client-data', ({conn, info, data}) => {
-      this.client_message(data, info, conn)
-     }) 
 
-    this.network.on('node-data', ({conn, info, data}) => { 
+    //Event listeners
+    this.network.on('client-data', ({ conn, info, data }) => {
+      this.client_message(data, info, conn)
+    })
+
+    this.network.on('node-data', ({ conn, info, data }) => {
       this.node_message(data, info, conn)
     })
 
@@ -519,31 +519,31 @@ class HuginNode extends EventEmitter {
     console.log(chalk.white("......................................."))
 
     process.on('SIGTERM', async () => {
-      console.log(chalk.red("Closing node..."))
+      log(chalk.red("Closing node..."))
       await this.save_pool()
-      console.log("Closed.")
-      process.exit(0);
-    });
-    
-    process.on('SIGINT', async () => {
-      console.log(chalk.red("Closing node..."))
-      await this.save_pool()
-      console.log("Closed.")
+      log("Closed.")
       process.exit(0);
     });
 
-    setInterval( async () => this.cleaner(), 600000);
+    process.on('SIGINT', async () => {
+      log(chalk.red("Closing node..."))
+      await this.save_pool()
+      log("Closed.")
+      process.exit(0);
+    });
+
+    setInterval(async () => this.cleaner(), 600000);
 
     this.init_pool()
   }
 
   init_pool() {
     if (!POOLS.length) {
-      console.log(chalk.red("No pools configured."))
+      log(chalk.red("No pools configured."))
       return
     }
     const startupPool = POOLS[this.poolIndex]
-    console.log(chalk.cyan(`Connecting to pool ${startupPool.host}:${startupPool.port} (ssl: ${startupPool.ssl ? 'on' : 'off'})`))
+    log(chalk.cyan(`Connecting to pool ${startupPool.host}:${startupPool.port} (ssl: ${startupPool.ssl ? 'on' : 'off'})`))
     this.connect_pool(POOLS[this.poolIndex])
   }
 
@@ -704,7 +704,7 @@ class HuginNode extends EventEmitter {
       await save(message);
     }
 
-    console.log(chalk.green("Saved messages from pool."));
+    log(chalk.green("Saved messages from pool."));
   }
 
   async node_message(data, info, conn) {
@@ -714,8 +714,8 @@ class HuginNode extends EventEmitter {
       if (!message || typeof message !== 'object') return
       if (!this.check(message)) return
       if (!(await this.pow_check_gossip(message))) {
-        console.log("Failed to add message:", POW_INVALID.reason)
-        console.log(chalk.red("Invalid node signal message, ban node"))
+        log("Failed to add message:", POW_INVALID.reason)
+        log(chalk.red("Invalid node signal message, ban node"))
         this.network.ban(info, conn)
         return
       }
@@ -730,7 +730,7 @@ class HuginNode extends EventEmitter {
       return
     }
 
-  } 
+  }
 
   async client_message(data, info, conn) {
     const client_id = this.client_id(conn)
@@ -738,21 +738,21 @@ class HuginNode extends EventEmitter {
     if ('request' in data) {
       const response = this.onrequest(data)
       if (!response) {
-          console.log(chalk.red("Invalid request command, ban user"))
-          this.network.ban(info, conn)
-          return
+        log(chalk.red("Invalid request command, ban user"))
+        this.network.ban(info, conn)
+        return
       }
 
       if (response.length > 500) {
         const parts = chunk_array(response, 500)
         for (const res of parts) {
-          this.send(conn,{response: res, id: data.id, chunks: true})
+          this.send(conn, { response: res, id: data.id, chunks: true })
           await sleep(20)
         }
-        this.send(conn,{id: data.id, done: true})
+        this.send(conn, { id: data.id, done: true })
         return
       }
-      this.send(conn,{response, id: data.id})
+      this.send(conn, { response, id: data.id })
       return
     }
 
@@ -777,16 +777,16 @@ class HuginNode extends EventEmitter {
         await this.client_post(data, info, conn)
         return
       } else {
-        console.log(chalk.red("Unknown client request type"))
+        log(chalk.red("Unknown client request type"))
         this.send(conn, { success: false, reason: 'unknown_type', id: data && data.id })
         return
       }
-     }
+    }
 
-     if ('register' in data) {
+    if ('register' in data) {
       await this.client_register(data, info, conn)
       return
-     }
+    }
 
   }
 
@@ -794,19 +794,19 @@ class HuginNode extends EventEmitter {
     const client_id = this.client_id(conn)
     const now = this.nowMs()
     const id = typeof data.id === 'number' ? data.id : data.timestamp
-    console.log(chalk.cyan(`[register] Received register packet from client ${client_id}`))
+    log(chalk.cyan(`[register] Received register packet from client ${client_id}`))
 
     const lastAccepted = this.clientPostLastAcceptedAt.get(conn) || 0
     if ((now - lastAccepted) < CLIENT_POST_COOLDOWN_MS) {
       logPow('client_register', { status: 'reject', reason: 'cooldown', client_id, id })
-      console.log(chalk.yellow(`[register] Cooldown reject for client ${client_id}`))
+      log(chalk.yellow(`[register] Cooldown reject for client ${client_id}`))
       this.send(conn, { success: false, reason: 'cooldown', id })
       return
     }
 
     if (this.has_accepted_pow_auth(data && data.hash, data && data.pow)) {
       logPow('client_register', { status: 'duplicate', client_id, id })
-      console.log(chalk.yellow(`[register] Duplicate register packet from client ${client_id}`))
+      log(chalk.yellow(`[register] Duplicate register packet from client ${client_id}`))
       this.send(conn, { success: true, duplicate: true, id })
       return
     }
@@ -816,28 +816,28 @@ class HuginNode extends EventEmitter {
       const strikes = (this.clientInvalidShareStrikes.get(conn) || 0) + 1
       this.clientInvalidShareStrikes.set(conn, strikes)
       logPow('client_register', { status: 'reject', reason: pre.reason, client_id, strikes, id, jobId: data && data.pow && data.pow.job && data.pow.job.job_id })
-      console.log(chalk.red(`[register] Cheap PoW rejected for client ${client_id}: ${pre.reason}`))
+      log(chalk.red(`[register] Cheap PoW rejected for client ${client_id}: ${pre.reason}`))
       this.send(conn, { reason: pre.reason, success: false, id })
       if (strikes >= 2) {
         this.network.ban(info, conn)
       }
       return
     }
-    console.log(chalk.green(`[register] Cheap PoW accepted for client ${client_id}`))
+    log(chalk.green(`[register] Cheap PoW accepted for client ${client_id}`))
 
     const verifiedShare = await this.pow_check_register(data)
     if (!verifiedShare) {
       const strikes = (this.clientInvalidShareStrikes.get(conn) || 0) + 1
       this.clientInvalidShareStrikes.set(conn, strikes)
       logPow('client_register', { status: 'reject', reason: 'pow_verify_failed', client_id, strikes, id, jobId: data && data.pow && data.pow.job && data.pow.job.job_id })
-      console.log(chalk.red(`[register] Share verification rejected for client ${client_id}`))
+      log(chalk.red(`[register] Share verification rejected for client ${client_id}`))
       this.send(conn, { reason: 'pow_verify_failed', success: false, id })
       if (strikes >= 2) {
         this.network.ban(info, conn)
       }
       return
     }
-    console.log(chalk.green(`[register] Share verification accepted for client ${client_id}`))
+    log(chalk.green(`[register] Share verification accepted for client ${client_id}`))
 
     const shares = data && data.pow && Array.isArray(data.pow.shares) ? data.pow.shares : []
     const submitRes = await this.submit_message_shares_with_reauth(shares, this.poolConnector)
@@ -846,12 +846,12 @@ class HuginNode extends EventEmitter {
 
     if (!accepted) {
       logPow('client_register', { status: 'reject', reason: 'pool_reject', client_id, id, jobId: data && data.pow && data.pow.job && data.pow.job.job_id, rejects })
-      console.log(chalk.red(`[register] Pool rejected register packet from client ${client_id}`), rejects)
+      log(chalk.red(`[register] Pool rejected register packet from client ${client_id}`), rejects)
       this.send(conn, { reason: 'pool_reject', success: false, id, rejects })
       if (this.poolJob) {
         try {
           this.send(conn, { type: 'job', job: this.poolJob })
-        } catch (_) {}
+        } catch (_) { }
       }
       return
     }
@@ -860,7 +860,7 @@ class HuginNode extends EventEmitter {
     this.clientInvalidShareStrikes.delete(conn)
     this.mark_accepted_pow_auth(data && data.hash, data && data.pow)
     this.send(conn, { success: true, id })
-    console.log(chalk.green(`[register] Pool accepted register packet from client ${client_id}, forwarding to node-server`))
+    log(chalk.green(`[register] Pool accepted register packet from client ${client_id}, forwarding to node-server`))
     this.network.notify(data)
   }
 
@@ -941,7 +941,7 @@ class HuginNode extends EventEmitter {
       if (this.poolJob) {
         try {
           this.send(conn, { type: 'job', job: this.poolJob })
-        } catch (_) {}
+        } catch (_) { }
       }
       return
     }
@@ -996,20 +996,20 @@ class HuginNode extends EventEmitter {
     this.send(conn, { type: 'job_pending', id: data.id })
   }
 
- async on_message(data, conn, info) {
+  async on_message(data, conn, info) {
     const post = await this.post(data.message)
     if (post.success) {
       this.send(conn, {
-        success: true, 
+        success: true,
         id: data.message.id
       })
       return true
     } else if (!post.success) {
-      this.send(conn, { 
-          reason: post.reason, 
-          success: false, 
-          id: data.message.id
-        })
+      this.send(conn, {
+        reason: post.reason,
+        success: false,
+        id: data.message.id
+      })
       // Cooldown is not wrongdoing; don't disconnect/ban.
       if (post.reason === 'cooldown') {
         return false
@@ -1022,8 +1022,8 @@ class HuginNode extends EventEmitter {
   }
 
   gossip(message) {
-      this.network.onmessage(message)
-      this.network.signal(message)
+    this.network.onmessage(message)
+    this.network.signal(message)
   }
 
   //From a client, gossip to other nodes.
@@ -1057,7 +1057,7 @@ class HuginNode extends EventEmitter {
       : rest
     this.pool.set(message.hash, stored);
     this.mark_accepted_pow_auth(message.hash, message.pow)
-    console.log(chalk.yellow("Pool update. Number of messages:", this.pool.size))
+    log(chalk.yellow("Pool update. Number of messages:", this.pool.size))
     return verify
   }
 
@@ -1300,7 +1300,7 @@ class HuginNode extends EventEmitter {
 
     const { job, shares: cappedShares } = validated
     const required = this.pow_target(message.hash)
-    
+
     // Slow verification (random-sampled)
     let valid = 0
     const toCheck = cappedShares.length
@@ -1416,4 +1416,4 @@ class HuginNode extends EventEmitter {
 
 }
 
-module.exports={HuginNode}
+module.exports = { HuginNode }

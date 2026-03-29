@@ -4,6 +4,13 @@ const sodium = require('sodium-universal');
 const { Crypto } = require('kryptokrona-utils')
 const crypto = new Crypto()
 
+const isDebug = process.argv.includes('--debug');
+function log(...args) {
+  if (isDebug) {
+    console.log(...args);
+  }
+}
+
 function get_new_peer_keys(key) {
   const secret = Buffer.alloc(32).fill(key)
   const base_keys = create_peer_base_keys(secret)
@@ -13,9 +20,9 @@ function get_new_peer_keys(key) {
   return [base_keys, dht_keys, signature]
 }
 
-function create_peer_base_keys(buf) { 
+function create_peer_base_keys(buf) {
   const keypair = DHT.keyPair(buf)
-  const keys = Keychains.from(keypair) 
+  const keys = Keychains.from(keypair)
   return keys
 }
 
@@ -32,7 +39,7 @@ function random_key() {
 
 function toHex(str) {
   var result = '';
-  for (var i=0; i<str.length; i++) {
+  for (var i = 0; i < str.length; i++) {
     result += str.charCodeAt(i).toString(16);
   }
   return result;
@@ -55,12 +62,12 @@ function sleep(ms) {
 }
 
 function parse(data) {
-  try{
-      return JSON.parse(data)
-  }catch(e) {
-      return false
+  try {
+    return JSON.parse(data)
+  } catch (e) {
+    return false
   }
 }
 
 
-module.exports={get_new_peer_keys, create_keys_from_seed, hash, parse, sleep, chunk_array}
+module.exports = { get_new_peer_keys, create_keys_from_seed, hash, parse, sleep, chunk_array, log }

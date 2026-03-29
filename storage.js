@@ -1,3 +1,4 @@
+const { log } = require('./utils');
 
 const HyperDB = require('hyperdb')
 const def = require('./spec/hyperdb/index.js');
@@ -55,7 +56,7 @@ async function save(message) {
 async function remove(timestamp) {
   await db.delete('@messages/messages', { timestamp });
   await db.flush();
-  console.log('Message deleted with timestamp:', timestamp);
+  log('Message deleted with timestamp:', timestamp);
 }
 
 /**
@@ -66,7 +67,7 @@ async function load() {
   await delete_old()
   const queryStream = db.find('@messages/messages', {});
   const messages = await queryStream.toArray();
-  console.log('Loaded messages:', messages.length);
+  log('Loaded messages:', messages.length);
   const pool = new Map();
   for (const message of messages) {
     pool.set(message.hash, message);
