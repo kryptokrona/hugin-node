@@ -1123,7 +1123,7 @@ class HuginNode extends EventEmitter {
     if ((job.blob.length / 2) > MAX_JOB_BLOB_HEX_BYTES) return false
     if (!isHexString(job.target) || job.target.length !== 8) return false
 
-    if (message.cipher.length > 4096) return false
+    if (message.cipher.length > 8192) return false
     if (!isHexString(message.cipher)) return false
     if (message.kind !== undefined) {
       if (typeof message.kind !== 'string') return false
