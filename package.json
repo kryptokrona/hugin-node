@@ -1,8 +1,11 @@
 {
   "name": "hugin-node",
-  "version": "2.0.0",
+  "version": "2.0.0-beta.1",
   "description": "A decentralized node system for Hugin messages.",
   "main": "index.js",
+  "bin": {
+    "hugin-node": "./index.js"
+  },
   "scripts": {
     "setup": "node setup.js",
     "start": "node index.js",
