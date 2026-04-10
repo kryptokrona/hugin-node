@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 
 const chalk = require('chalk');
 const readline = require('readline');
@@ -97,7 +98,7 @@ async function ensure_payout_address() {
 async function start_check() {
   console.log(chalk.green("You are running Hugin Node version", NODE_VERSION))
   if (!fs.existsSync('./db')) {
-      fs.mkdirSync('./db');
+    fs.mkdirSync('./db');
   }
   const created = ensureConfigExists()
   if (created) {
@@ -122,7 +123,7 @@ async function start_node() {
   console.log(huginArt)
   console.log(chalk.white('Starting Hugin Node...'));
 
-  if(!await NodeId.init()) {
+  if (!await NodeId.init()) {
     console.log(chalk.red("Error importing node wallet."))
   }
   const config = loadConfig();
@@ -136,7 +137,7 @@ async function start_node() {
 }
 
 async function commands(node) {
- 
+
   const com = readline.createInterface({
     input: process.stdin,
     output: process.stdout
@@ -144,11 +145,11 @@ async function commands(node) {
 
   async function handle(command) {
     switch (command) {
-      
+
       case 'stats':
         SHOW_STATS(node)
         break;
-  
+
       case 'info':
         SHOW_INFO(node)
         break;
@@ -193,15 +194,15 @@ const SHOW_INFO = (node) => {
 }
 
 const SHOW_STATS = async (node) => {
-   // More stats?
-   console.log(chalk.blue.bold(':::::::::::::::::::::::'))
-   console.log(chalk.blue.bold(':::::::::STATS:::::::::'))
-   console.log(`${chalk.green('Active clients:')} ${chalk.yellow(node.network.clients.length)}`)
-   console.log(`${chalk.green('Nodes:')} ${chalk.yellow(node.network.nodes.length)}`)
-   console.log(`${chalk.green('Messages in Pool:')} ${chalk.yellow(node.pool.size)}`)
-   console.log(chalk.blue.bold(':::::::::::::::::::::::'))
-   console.log(chalk.blue.bold(':::::::::::::::::::::::'))
-   //Number of relayed messages?
+  // More stats?
+  console.log(chalk.blue.bold(':::::::::::::::::::::::'))
+  console.log(chalk.blue.bold(':::::::::STATS:::::::::'))
+  console.log(`${chalk.green('Active clients:')} ${chalk.yellow(node.network.clients.length)}`)
+  console.log(`${chalk.green('Nodes:')} ${chalk.yellow(node.network.nodes.length)}`)
+  console.log(`${chalk.green('Messages in Pool:')} ${chalk.yellow(node.pool.size)}`)
+  console.log(chalk.blue.bold(':::::::::::::::::::::::'))
+  console.log(chalk.blue.bold(':::::::::::::::::::::::'))
+  //Number of relayed messages?
 }
 
 process.on('uncaughtException', (err) => {
